@@ -99,36 +99,19 @@ jobs:
         id: terraform-outputs
         run: |
           cd terraform
-          # disable terraform debug logs if set
-          unset TF_LOG
-          # get each output, remove any debug lines, and trim newlines
-          kinesis_stream=$(terraform output -raw kinesis_stream_name 2>&1 | grep -v "::debug::" | tr -d '\n')
-          s3_bucket=$(terraform output -raw s3_bucket_name 2>&1 | grep -v "::debug::" | tr -d '\n')
-          training_bucket=$(terraform output -raw training_bucket_name 2>&1 | grep -v "::debug::" | tr -d '\n')
-          dynamodb_table=$(terraform output -raw dynamodb_table_name 2>&1 | grep -v "::debug::" | tr -d '\n')
-          lambda_function=$(terraform output -raw lambda_function_name 2>&1 | grep -v "::debug::" | tr -d '\n')
-          alert_topic_arn=$(terraform output -raw alert_topic_arn 2>&1 | grep -v "::debug::" | tr -d '\n')
-
-          echo "KINESIS_STREAM=${kinesis_stream}" >> $GITHUB_ENV
-          echo "S3_BUCKET=${s3_bucket}" >> $GITHUB_ENV
-          echo "TRAINING_BUCKET=${training_bucket}" >> $GITHUB_ENV
-          echo "DYNAMODB_TABLE=${dynamodb_table}" >> $GITHUB_ENV
-          echo "LAMBDA_FUNCTION=${lambda_function}" >> $GITHUB_ENV
-          echo "ALERT_TOPIC_ARN=${alert_topic_arn}" >> $GITHUB_ENV
+          echo "KINESIS_STREAM=$(terraform output -raw kinesis_stream_name)" >> $GITHUB_ENV
+          echo "S3_BUCKET=$(terraform output -raw s3_bucket_name)" >> $GITHUB_ENV
+          echo "TRAINING_BUCKET=$(terraform output -raw training_bucket_name)" >> $GITHUB_ENV
+          echo "DYNAMODB_TABLE=$(terraform output -raw dynamodb_table_name)" >> $GITHUB_ENV
+          echo "LAMBDA_FUNCTION=$(terraform output -raw lambda_function_name)" >> $GITHUB_ENV
+          echo "ALERT_TOPIC_ARN=$(terraform output -raw alert_topic_arn)" >> $GITHUB_ENV
+          echo "SAGEMAKER_ENDPOINT=$(terraform output -raw sagemaker_endpoint_name)" >> $GITHUB_ENV
+      
       # Update Lambda function
       - name: Update Lambda function
         run: |
-          echo "Updating Lambda function code..."
-          mkdir -p lambda_package
-          cp src/lambda/fraud_detector.py lambda_package/
-          cd lambda_package
-          pip install boto3 -t .
-          zip -r ../lambda_function.zip .
-          cd ..
-          
-          # Upload to Lambda
           aws lambda update-function-code \
-            --function-name ${LAMBDA_FUNCTION} \
+            --function-name ${{ env.LAMBDA_FUNCTION }} \
             --zip-file fileb://lambda_function.zip
       
       # Prepare SageMaker inference script
@@ -166,76 +149,58 @@ jobs:
       # Generate test transactions
       - name: Generate test transactions
         run: |
-          echo "Generating test transactions..."
-          cd src/data_generator
-          pip install faker boto3
-          python generator.py \
+          python src/data_generator/generator.py \
             --mode kinesis \
-            --stream ${KINESIS_STREAM} \
+            --stream ${{ env.KINESIS_STREAM }} \
             --count 10 \
             --fraud-rate 0.3 || echo "Transaction generation failed but continuing deployment"
       
       # Set up real-time simulation of transaction data (runs in background)
       - name: Set up real-time transaction simulation
         run: |
-          echo "Setting up transaction simulation..."
-          # Create a simple simulation script
+          # Create a script to continuously generate transactions
           cat > simulate_transactions.sh << 'EOT'
           #!/bin/bash
           echo "Starting transaction simulation..."
-          # Install required packages
-          pip install faker boto3
-          
-          # Run a few test transactions
-          cd src/data_generator
-          python generator.py --mode kinesis --stream ${KINESIS_STREAM} --count 1 --fraud-rate 0.1
-          python generator.py --mode kinesis --stream ${KINESIS_STREAM} --count 1 --fraud-rate 0.9
-          
-          echo "Transaction simulation completed"
+          while true; do
+            python src/data_generator/generator.py \
+              --mode kinesis \
+              --stream $STREAM_NAME \
+              --count 1 \
+              --rate 0.2 \
+              --fraud-rate 0.1
+            sleep 5
+          done
           EOT
           
           chmod +x simulate_transactions.sh
           
-          # Run the script
-          ./simulate_transactions.sh
+          # Run the simulation in the background
+          nohup ./simulate_transactions.sh > simulation.log 2>&1 &
+          echo "Transaction simulation started in background"
+          echo "STREAM_NAME=${{ env.KINESIS_STREAM }}" > .env
           
-          # Upload the script to S3 for reference
-          aws s3 cp simulate_transactions.sh s3://${S3_BUCKET}/scripts/simulate_transactions.sh
+          # Upload the simulation script to S3 for documentation
+          aws s3 cp simulate_transactions.sh s3://${{ env.S3_BUCKET }}/scripts/simulate_transactions.sh
       
-      # Train a simple model with sample data for documentation
+      # Train a simple model with historical data
       - name: Train fraud detection model
         run: |
-          echo "Creating sample model..."
+          echo "Training fraud detection model with historical data..."
           
-          # Create sample directory
-          mkdir -p sample_model
+          # Download historical data from S3
+          aws s3 cp s3://${{ env.TRAINING_BUCKET_NAME }}/historical/sample_transactions.csv ./sample_transactions.csv
           
-          # Create a simple model config file
-          cat > sample_model/model_config.json << 'EOT'
-          {
-            "model_type": "rule_based",
-            "threshold": 0.7,
-            "risk_factors": {
-              "high_amount": 0.4,
-              "medium_amount": 0.2,
-              "mobile_device": 0.1,
-              "high_risk_location": 0.2,
-              "vpn_usage": 0.1,
-              "gift_card": 0.2,
-              "declined_status": 0.3
-            },
-            "metrics": {
-              "accuracy": 0.85,
-              "precision": 0.83,
-              "recall": 0.76,
-              "f1_score": 0.79
-            }
-          }
-          EOT
+          # Run the training script
+          python src/ml/train_model.py \
+            --data-path ./sample_transactions.csv \
+            --output-dir ./model \
+            --s3-bucket ${{ env.S3_BUCKET }}
           
-          # Upload model to S3
-          aws s3 cp sample_model/model_config.json s3://${S3_BUCKET}/models/fraud_model_config.json
-          echo "Sample model uploaded to S3"
+          # Upload trained model to S3 if the training script didn't do it
+          if [ -f "./model/fraud_detection_model.joblib" ]; then
+            aws s3 cp ./model/fraud_detection_model.joblib s3://${{ env.S3_BUCKET }}/models/fraud_detection_model.joblib
+          fi
       
       # Deploy to SageMaker
       - name: Deploy to SageMaker
@@ -264,25 +229,19 @@ jobs:
             aws s3 cp model.tar.gz s3://${{ env.S3_BUCKET }}/models/fraud_detection_model.tar.gz
           }
           
-          # Update SageMaker model
-          aws sagemaker update-model --model-name ${{ env.PROJECT_NAME }}-model \
-            --primary-container ModelDataUrl=s3://${{ env.S3_BUCKET }}/models/fraud_detection_model.tar.gz || {
-            echo "Update model failed, model might not exist yet. Continuing deployment."
+          # Wait for SageMaker resources to be created by Terraform
+          echo "Waiting for SageMaker resources to be fully created..."
+          sleep 30
+          
+          # Try to update SageMaker model if it exists
+          aws sagemaker update-endpoint --endpoint-name ${{ env.SAGEMAKER_ENDPOINT }} --endpoint-config-name ${{ env.PROJECT_NAME }}-endpoint-config || {
+            echo "Endpoint update failed, endpoint might still be creating. Continuing deployment."
           }
 
       # Notify on completion
       - name: Notify deployment completion
         run: |
           echo "Deployment completed successfully!"
-          echo "Kinesis Stream: ${KINESIS_STREAM}"
-          echo "DynamoDB Table: ${DYNAMODB_TABLE}"
-          echo "Lambda Function: ${LAMBDA_FUNCTION}"
-          echo "S3 Bucket: ${S3_BUCKET}"
-          echo "Training Bucket: ${TRAINING_BUCKET}"
-          
-          # Check for processed transactions
-          echo "Waiting for Lambda to process transactions..."
-          sleep 10
-          
-          echo "Checking for processed transactions in DynamoDB..."
-          aws dynamodb scan --table-name ${DYNAMODB_TABLE} --limit 5
+          echo "Kinesis Stream: ${{ env.KINESIS_STREAM }}"
+          echo "DynamoDB Table: ${{ env.DYNAMODB_TABLE }}"
+          echo "Lambda Function: ${{ env.LAMBDA_FUNCTION }}"

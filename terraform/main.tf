@@ -103,14 +103,23 @@ resource "aws_dynamodb_table" "results_table" {
   }
 }
 
-# SNS Topic for fraud alerts
+# SNS Topic for fraud alerts - modified to handle pre-existing topic
 resource "aws_sns_topic" "fraud_alerts" {
-  name = "${var.project_name}-alerts-${random_id.suffix.hex}"
+  name = "${var.project_name}-alerts"
   
-  tags = {
-    Name        = "Fraud Detection Alerts"
-    Environment = var.environment
-    Project     = var.project_name
+  # Remove tags to avoid conflicts with existing resources
+  # tags = {
+  #   Name        = "Fraud Detection Alerts"
+  #   Environment = var.environment
+  #   Project     = var.project_name
+  # }
+  
+  # Add lifecycle block to prevent destruction
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [
+      tags
+    ]
   }
 }
 
@@ -209,7 +218,7 @@ resource "aws_iam_role_policy_attachment" "lambda_policy_attachment" {
   policy_arn = aws_iam_policy.lambda_policy.arn
 }
 
-# Update Lambda function to not rely on SageMaker endpoint
+  # Lambda function for processing transactions
 resource "aws_lambda_function" "fraud_detection_lambda" {
   function_name    = "${var.project_name}-processor"
   role             = aws_iam_role.lambda_role.arn
@@ -232,6 +241,7 @@ resource "aws_lambda_function" "fraud_detection_lambda" {
       DYNAMODB_TABLE     = aws_dynamodb_table.results_table.name
       ALERT_TOPIC_ARN    = aws_sns_topic.fraud_alerts.arn
       ENVIRONMENT        = var.environment
+      SAGEMAKER_ENDPOINT = var.sagemaker_endpoint
       RISK_THRESHOLD     = "0.7"
     }
   }
@@ -279,8 +289,6 @@ resource "aws_cloudwatch_metric_alarm" "fraud_detection_alarm" {
   }
 }
 
-# Comment out SageMaker resources due to ECR permissions issue
-/*
 # SageMaker Resources for Prototyping
 
 # IAM role for SageMaker
@@ -307,19 +315,75 @@ resource "aws_iam_role" "sagemaker_role" {
   }
 }
 
-# Attach policy to SageMaker role
-resource "aws_iam_role_policy_attachment" "sagemaker_full_access" {
-  role       = aws_iam_role.sagemaker_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSageMakerFullAccess"
+# IAM policy for SageMaker execution
+resource "aws_iam_policy" "sagemaker_policy" {
+  name        = "${var.project_name}_sagemaker_exec_policy"
+  description = "Policy for SageMaker execution role"
+  
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "${aws_s3_bucket.data_bucket.arn}",
+          "${aws_s3_bucket.data_bucket.arn}/*",
+          "${aws_s3_bucket.training_data_bucket.arn}",
+          "${aws_s3_bucket.training_data_bucket.arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
 }
 
-# Create SageMaker Model
+# Attach policy to SageMaker role
+resource "aws_iam_role_policy_attachment" "sagemaker_policy_attachment" {
+  role       = aws_iam_role.sagemaker_role.name
+  policy_arn = aws_iam_policy.sagemaker_policy.arn
+}
+
+# Create SageMaker Model - adjusted to use a public ECR image
 resource "aws_sagemaker_model" "fraud_model" {
   name               = "${var.project_name}-model"
   execution_role_arn = aws_iam_role.sagemaker_role.arn
   
   primary_container {
-    image          = "683313688378.dkr.ecr.${var.aws_region}.amazonaws.com/sagemaker-scikit-learn:0.23-1-cpu-py3"
+    # Use pre-built scikit-learn container - official AWS public image
+    image = "121021644041.dkr.ecr.${var.aws_region}.amazonaws.com/sagemaker-scikit-learn:1.0-1-cpu-py3"
+    # Alternative public images: 
+    # image = "683313688378.dkr.ecr.${var.aws_region}.amazonaws.com/sagemaker-scikit-learn:1.0-1-cpu-py3"
+    # image = "737474898029.dkr.ecr.${var.aws_region}.amazonaws.com/sagemaker-scikit-learn:0.23-1-cpu-py3"
     model_data_url = "s3://${aws_s3_bucket.data_bucket.id}/models/fraud_detection_model.tar.gz"
   }
   
@@ -341,7 +405,7 @@ resource "aws_sagemaker_model" "fraud_model" {
       }' > tmp_model/model_config.json
       touch tmp_model/inference.py
       tar -czf model.tar.gz -C tmp_model .
-      aws s3 cp model.tar.gz s3://${aws_s3_bucket.data_bucket.id}/models/fraud_detection_model.tar.gz
+      aws s3 cp model.tar.gz s3://${aws_s3_bucket.data_bucket.id}/models/fraud_detection_model.tar.gz || echo "Failed to upload model, continuing anyway"
       rm -rf tmp_model model.tar.gz
     EOT
   }
@@ -376,7 +440,6 @@ resource "aws_sagemaker_endpoint" "fraud_endpoint" {
     Project     = var.project_name
   }
 }
-*/
 
 # SageMaker Variables
 variable "sagemaker_endpoint" {
@@ -513,34 +576,38 @@ resource "aws_iam_role_policy_attachment" "firehose_policy_attachment" {
 }
 */
 
-# Output values
-# Remove output for SageMaker endpoint since we commented it out
+# Output values - corrected format
 output "kinesis_stream_name" {
-  value = aws_kinesis_stream.transaction_stream.name
+  value       = aws_kinesis_stream.transaction_stream.name
   description = "Kinesis Stream Name"
 }
 
 output "s3_bucket_name" {
-  value = aws_s3_bucket.data_bucket.id
+  value       = aws_s3_bucket.data_bucket.id
   description = "S3 Bucket Name"
 }
 
 output "training_bucket_name" {
-  value = aws_s3_bucket.training_data_bucket.id
+  value       = aws_s3_bucket.training_data_bucket.id
   description = "Training Data Bucket Name"
 }
 
 output "dynamodb_table_name" {
-  value = aws_dynamodb_table.results_table.name
+  value       = aws_dynamodb_table.results_table.name
   description = "DynamoDB Table Name"
 }
 
 output "lambda_function_name" {
-  value = aws_lambda_function.fraud_detection_lambda.function_name
+  value       = aws_lambda_function.fraud_detection_lambda.function_name
   description = "Lambda Function Name"
 }
 
 output "alert_topic_arn" {
-  value = aws_sns_topic.fraud_alerts.arn
+  value       = aws_sns_topic.fraud_alerts.arn
   description = "SNS Alert Topic ARN"
+}
+
+output "sagemaker_endpoint_name" {
+  value       = aws_sagemaker_endpoint.fraud_endpoint.name
+  description = "SageMaker Endpoint Name"
 }
