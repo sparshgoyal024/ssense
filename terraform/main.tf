@@ -248,7 +248,6 @@ resource "aws_lambda_function" "fraud_detection_lambda" {
       DYNAMODB_TABLE     = aws_dynamodb_table.results_table.name
       ALERT_TOPIC_ARN    = aws_sns_topic.fraud_alerts.arn
       ENVIRONMENT        = var.environment
-      SAGEMAKER_ENDPOINT = var.deploy_sagemaker ? aws_sagemaker_endpoint.fraud_endpoint[0].name : ""
       RISK_THRESHOLD     = "0.7"
     }
   }
@@ -394,58 +393,6 @@ resource "aws_iam_role_policy_attachment" "sagemaker_full_access" {
 }
 
 # Create SageMaker Model - Using fully-qualified ARN for the image
-resource "aws_sagemaker_model" "fraud_model" {
-  count = var.deploy_sagemaker ? 1 : 0
-
-  name               = "${var.project_name}-model"
-  execution_role_arn = aws_iam_role.sagemaker_role.arn
-  
-  # Use a built-in algorithm instead (no ECR permissions needed)
-  primary_container {
-    image = "174872318107.dkr.ecr.${var.aws_region}.amazonaws.com/kmeans:1"
-    
-    # Either don't use model_data_url for built-in algorithms or ensure it exists first
-    # model_data_url = "s3://${aws_s3_bucket.data_bucket.id}/models/fraud_detection_model.tar.gz"
-  }
-  
-  tags = {
-    Name        = "Fraud Detection Model"
-    Environment = var.environment
-    Project     = var.project_name
-  }
-
-  # Create the model artifact first, before creating the SageMaker model
-  provisioner "local-exec" {
-    command = <<EOT
-      # Create a simple model artifact for prototyping
-      mkdir -p tmp_model
-      echo '{
-        "model_type": "rule_based",
-        "threshold": 0.7,
-        "version": "0.1"
-      }' > tmp_model/model_config.json
-      echo 'print("Hello from inference.py")' > tmp_model/inference.py
-      tar -czf model.tar.gz -C tmp_model .
-      aws s3 cp model.tar.gz s3://${aws_s3_bucket.data_bucket.id}/models/fraud_detection_model.tar.gz
-      echo "Uploaded model to s3://${aws_s3_bucket.data_bucket.id}/models/fraud_detection_model.tar.gz"
-      rm -rf tmp_model model.tar.gz
-    EOT
-    # Run this BEFORE creating the SageMaker model
-    on_failure = fail
-  }
-
-  # Make sure the S3 bucket exists before running the model creation
-  depends_on = [
-    aws_s3_bucket.data_bucket,
-    aws_iam_role_policy_attachment.sagemaker_policy_attachment,
-    aws_iam_role_policy_attachment.sagemaker_full_access
-  ]
-}
-
-# Create SageMaker Endpoint Configuration
-
-
-# Create SageMaker Endpoint
 
 # SageMaker Variables
 
@@ -608,7 +555,3 @@ output "alert_topic_arn" {
   description = "SNS Alert Topic ARN"
 }
 
-output "sagemaker_endpoint_name" {
-  value       = aws_sagemaker_endpoint.fraud_endpoint.name
-  description = "SageMaker Endpoint Name"
-}
