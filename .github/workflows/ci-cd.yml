@@ -94,12 +94,10 @@ jobs:
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="project_name=${{ env.PROJECT_NAME }}" 
       
-      # Extract Terraform outputs
       - name: Extract Terraform outputs
         id: terraform-outputs
         run: |
           cd terraform
-# Extract outputs without using -raw which is causing issues
           kinesis_stream=$(terraform output kinesis_stream_name | tr -d '"' | tr -d '\n')
           s3_bucket=$(terraform output s3_bucket_name | tr -d '"' | tr -d '\n')
           training_bucket=$(terraform output training_bucket_name | tr -d '"' | tr -d '\n')
@@ -113,7 +111,6 @@ jobs:
           echo "DYNAMODB_TABLE=${dynamodb_table}" >> $GITHUB_ENV
           echo "LAMBDA_FUNCTION=${lambda_function}" >> $GITHUB_ENV
           echo "ALERT_TOPIC_ARN=${alert_topic_arn}" >> $GITHUB_ENV
-      # Update Lambda function
       - name: Update Lambda function
         run: |
           aws lambda update-function-code \
