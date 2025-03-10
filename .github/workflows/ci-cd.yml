@@ -99,26 +99,25 @@ jobs:
         run: |
           cd terraform
           
-          # First, capture all outputs to examine the format
-          echo "Checking Terraform outputs..."
-          terraform output
+          # Save each output to a separate file first
+          terraform output -raw kinesis_stream_name > kinesis.txt
+          terraform output -raw s3_bucket_name > s3.txt
+          terraform output -raw dynamodb_table_name > dynamo.txt
+          terraform output -raw lambda_function_name > lambda.txt
           
-          # Extract values directly using grep/sed
-          kinesis_stream=$(terraform output | grep kinesis_stream_name | awk -F'= ' '{print $2}' | tr -d '"')
-          s3_bucket=$(terraform output | grep s3_bucket_name | awk -F'= ' '{print $2}' | tr -d '"')
-          dynamodb_table=$(terraform output | grep dynamodb_table_name | awk -F'= ' '{print $2}' | tr -d '"')
-          lambda_function=$(terraform output | grep lambda_function_name | awk -F'= ' '{print $2}' | tr -d '"')
-          alert_topic_arn=$(terraform output | grep alert_topic_arn | awk -F'= ' '{print $2}' | tr -d '"')
+          # Read values from files
+          kinesis_stream=$(cat kinesis.txt)
+          s3_bucket=$(cat s3.txt)
+          dynamodb_table=$(cat dynamo.txt)
+          lambda_function=$(cat lambda.txt)
           
-          # Set environment variables
-          echo "Setting environment variables..."
+          # Set environment variables one by one
           echo "KINESIS_STREAM=${kinesis_stream}" >> $GITHUB_ENV
-          echo "S3_BUCKET=${s3_bucket}" >> $GITHUB_ENV
+          echo "S3_BUCKET=${s3_bucket}" >> $GITHUB_ENV 
           echo "DYNAMODB_TABLE=${dynamodb_table}" >> $GITHUB_ENV
           echo "LAMBDA_FUNCTION=${lambda_function}" >> $GITHUB_ENV
-          echo "ALERT_TOPIC_ARN=${alert_topic_arn}" >> $GITHUB_ENV
           
-          # Print values for debugging
+          # Show the values for verification
           echo "Kinesis Stream: ${kinesis_stream}"
           echo "S3 Bucket: ${s3_bucket}"
           echo "DynamoDB Table: ${dynamodb_table}"
