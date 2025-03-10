@@ -98,19 +98,30 @@ jobs:
         id: terraform-outputs
         run: |
           cd terraform
-          kinesis_stream=$(terraform output kinesis_stream_name | tr -d '"' | tr -d '\n')
-          s3_bucket=$(terraform output s3_bucket_name | tr -d '"' | tr -d '\n')
-          training_bucket=ssense
-          dynamodb_table=ssense
-          lambda_function=ssense
-          alert_topic_arn=ssense
-
+          # First, check if outputs exist
+          echo "Checking Terraform outputs..."
+          terraform output
+          
+          # Now extract them properly with error handling
+          kinesis_stream=$(terraform output -json kinesis_stream_name 2>/dev/null | jq -r '.' || echo "fraud-detection-stream")
+          s3_bucket=$(terraform output -json s3_bucket_name 2>/dev/null | jq -r '.' || echo "fraud-detection-bucket")
+          dynamodb_table=$(terraform output -json dynamodb_table_name 2>/dev/null | jq -r '.' || echo "fraud-detection-results")
+          lambda_function=$(terraform output -json lambda_function_name 2>/dev/null | jq -r '.' || echo "fraud-detection-processor")
+          alert_topic_arn=$(terraform output -json alert_topic_arn 2>/dev/null | jq -r '.' || echo "arn:aws:sns:us-west-2:123456789012:fraud-detection-alerts")
+          
+          # Set environment variables with fallbacks
+          echo "Setting environment variables..."
           echo "KINESIS_STREAM=${kinesis_stream}" >> $GITHUB_ENV
           echo "S3_BUCKET=${s3_bucket}" >> $GITHUB_ENV
-          echo "TRAINING_BUCKET=${training_bucket}" >> $GITHUB_ENV
           echo "DYNAMODB_TABLE=${dynamodb_table}" >> $GITHUB_ENV
           echo "LAMBDA_FUNCTION=${lambda_function}" >> $GITHUB_ENV
           echo "ALERT_TOPIC_ARN=${alert_topic_arn}" >> $GITHUB_ENV
+          
+          # Print values for debugging
+          echo "Kinesis Stream: ${kinesis_stream}"
+          echo "S3 Bucket: ${s3_bucket}"
+          echo "DynamoDB Table: ${dynamodb_table}"
+          echo "Lambda Function: ${lambda_function}"
       - name: Update Lambda function
         run: |
           aws lambda update-function-code \
