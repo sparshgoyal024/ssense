@@ -209,7 +209,7 @@ resource "aws_iam_role_policy_attachment" "lambda_policy_attachment" {
   policy_arn = aws_iam_policy.lambda_policy.arn
 }
 
-# Lambda function for processing transactions
+  # Lambda function for processing transactions
 resource "aws_lambda_function" "fraud_detection_lambda" {
   function_name    = "${var.project_name}-processor"
   role             = aws_iam_role.lambda_role.arn
@@ -218,9 +218,14 @@ resource "aws_lambda_function" "fraud_detection_lambda" {
   timeout          = 60
   memory_size      = 256
   
-  # We'll use a placeholder initially and update with GitHub Actions
-  filename         = "lambda_function.zip"
-  source_code_hash = filebase64sha256("lambda_function.zip")
+  # Use placeholder zip code content
+  filename         = "${path.module}/lambda_function.zip"
+  
+  # Generate a dummy lambda zip if it doesn't exist
+  provisioner "local-exec" {
+    command = "echo 'placeholder' > temp.txt && zip ${path.module}/lambda_function.zip temp.txt && rm temp.txt"
+    interpreter = ["bash", "-c"]
+  }
   
   environment {
     variables = {
@@ -418,17 +423,17 @@ T5,U5678,75.30,desktop,"Texas, USA",false,credit,approved,0' > sample_transactio
 # Kinesis Data Firehose for streaming to S3 (persistent storage of all transactions)
 resource "aws_kinesis_firehose_delivery_stream" "transaction_delivery_stream" {
   name        = "${var.project_name}-delivery-stream"
-  destination = "s3"
+  destination = "extended_s3"
   
   kinesis_source_configuration {
     kinesis_stream_arn = aws_kinesis_stream.transaction_stream.arn
     role_arn           = aws_iam_role.firehose_role.arn
   }
   
-  s3_configuration {
-    role_arn   = aws_iam_role.firehose_role.arn
-    bucket_arn = aws_s3_bucket.data_bucket.arn
-    prefix     = "transactions/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/"
+  extended_s3_configuration {
+    role_arn           = aws_iam_role.firehose_role.arn
+    bucket_arn         = aws_s3_bucket.data_bucket.arn
+    prefix             = "transactions/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/"
     buffer_size        = 5
     buffer_interval    = 300
     compression_format = "GZIP"

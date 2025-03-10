@@ -73,6 +73,14 @@ jobs:
         with:
           terraform_version: 1.0.0
       
+      # Create dummy Lambda zip
+      - name: Create placeholder Lambda zip
+        run: |
+          echo "Creating placeholder Lambda deployment package..."
+          echo "placeholder" > placeholder.txt
+          zip terraform/lambda_function.zip placeholder.txt
+          ls -la terraform/
+      
       - name: Terraform Init
         run: |
           cd terraform
@@ -93,9 +101,11 @@ jobs:
           cd terraform
           echo "KINESIS_STREAM=$(terraform output -raw kinesis_stream_name)" >> $GITHUB_ENV
           echo "S3_BUCKET=$(terraform output -raw s3_bucket_name)" >> $GITHUB_ENV
+          echo "TRAINING_BUCKET=$(terraform output -raw training_bucket_name)" >> $GITHUB_ENV
           echo "DYNAMODB_TABLE=$(terraform output -raw dynamodb_table_name)" >> $GITHUB_ENV
           echo "LAMBDA_FUNCTION=$(terraform output -raw lambda_function_name)" >> $GITHUB_ENV
           echo "ALERT_TOPIC_ARN=$(terraform output -raw alert_topic_arn)" >> $GITHUB_ENV
+          echo "SAGEMAKER_ENDPOINT=$(terraform output -raw sagemaker_endpoint_name)" >> $GITHUB_ENV
       
       # Update Lambda function
       - name: Update Lambda function
