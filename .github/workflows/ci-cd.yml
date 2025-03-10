@@ -99,13 +99,19 @@ jobs:
         id: terraform-outputs
         run: |
           cd terraform
-          echo "KINESIS_STREAM=fraud-detection-stream" >> $GITHUB_ENV
-          echo "S3_BUCKET=$(terraform output -raw s3_bucket_name)" >> $GITHUB_ENV
-          echo "TRAINING_BUCKET=$(terraform output -raw training_bucket_name)" >> $GITHUB_ENV
-          echo "DYNAMODB_TABLE=$(terraform output -raw dynamodb_table_name)" >> $GITHUB_ENV
-          echo "LAMBDA_FUNCTION=$(terraform output -raw lambda_function_name)" >> $GITHUB_ENV
-          echo "ALERT_TOPIC_ARN=$(terraform output -raw alert_topic_arn)" >> $GITHUB_ENV
-      
+          kinesis_stream=$(terraform output -raw kinesis_stream_name 2>&1 | grep -v "::debug::" | tr -d '\n')
+          s3_bucket=$(terraform output -raw s3_bucket_name 2>&1 | grep -v "::debug::" | tr -d '\n')
+          training_bucket=$(terraform output -raw training_bucket_name 2>&1 | grep -v "::debug::" | tr -d '\n')
+          dynamodb_table=$(terraform output -raw dynamodb_table_name 2>&1 | grep -v "::debug::" | tr -d '\n')
+          lambda_function=$(terraform output -raw lambda_function_name 2>&1 | grep -v "::debug::" | tr -d '\n')
+          alert_topic_arn=$(terraform output -raw alert_topic_arn 2>&1 | grep -v "::debug::" | tr -d '\n')
+
+          echo "KINESIS_STREAM=${kinesis_stream}" >> $GITHUB_ENV
+          echo "S3_BUCKET=${s3_bucket}" >> $GITHUB_ENV
+          echo "TRAINING_BUCKET=${training_bucket}" >> $GITHUB_ENV
+          echo "DYNAMODB_TABLE=${dynamodb_table}" >> $GITHUB_ENV
+          echo "LAMBDA_FUNCTION=${lambda_function}" >> $GITHUB_ENV
+          echo "ALERT_TOPIC_ARN=${alert_topic_arn}" >> $GITHUB_ENV
       # Update Lambda function
       - name: Update Lambda function
         run: |
