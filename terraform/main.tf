@@ -443,33 +443,11 @@ resource "aws_sagemaker_model" "fraud_model" {
 }
 
 # Create SageMaker Endpoint Configuration
-resource "aws_sagemaker_endpoint" "fraud_endpoint" {
-  count = var.deploy_sagemaker ? 1 : 0
 
-  name = "${var.project_name}-endpoint-config"
-  
-  production_variants {
-    variant_name           = "default"
-    model_name             = aws_sagemaker_model.fraud_model.name
-    instance_type          = "ml.t2.medium"  # Smallest instance for prototyping
-    initial_instance_count = 1
-  }
-  
-  tags = {
-    Name        = "Fraud Detection Endpoint Config"
-    Environment = var.environment
-    Project     = var.project_name
-  }
-}
 
 # Create SageMaker Endpoint
 
 # SageMaker Variables
-variable "sagemaker_endpoint" {
-  description = "SageMaker endpoint name for fraud detection"
-  type        = string
-  default     = "fraud-detection-endpoint"
-}
 
 # S3 bucket for historical training data
 resource "aws_s3_bucket" "training_data_bucket" {
