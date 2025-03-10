@@ -98,31 +98,19 @@ jobs:
         id: terraform-outputs
         run: |
           cd terraform
+          # Extract outputs or use default naming pattern if they fail
+          project_name="${{ env.PROJECT_NAME }}"
           
-          # Save each output to a separate file first
-          terraform output -raw kinesis_stream_name > kinesis.txt
-          terraform output -raw s3_bucket_name > s3.txt
-          terraform output -raw dynamodb_table_name > dynamo.txt
-          terraform output -raw lambda_function_name > lambda.txt
+          # Use consistent naming that matches Terraform resource names
+          kinesis_stream="${project_name}-stream"
+          s3_bucket=$(terraform output s3_bucket_name | tr -d '"' | tr -d '\n' || echo "${project_name}-data-bucket")
+          lambda_function="${project_name}-processor"
+          dynamodb_table="${project_name}-results"
           
-          # Read values from files
-          kinesis_stream=$(cat kinesis.txt)
-          s3_bucket=$(cat s3.txt)
-          dynamodb_table=$(cat dynamo.txt)
-          lambda_function=$(cat lambda.txt)
-          
-          # Set environment variables one by one
           echo "KINESIS_STREAM=${kinesis_stream}" >> $GITHUB_ENV
-          echo "S3_BUCKET=${s3_bucket}" >> $GITHUB_ENV 
-          echo "DYNAMODB_TABLE=${dynamodb_table}" >> $GITHUB_ENV
+          echo "S3_BUCKET=${s3_bucket}" >> $GITHUB_ENV
           echo "LAMBDA_FUNCTION=${lambda_function}" >> $GITHUB_ENV
-          
-          # Show the values for verification
-          echo "Kinesis Stream: ${kinesis_stream}"
-          echo "S3 Bucket: ${s3_bucket}"
-          echo "DynamoDB Table: ${dynamodb_table}"
-          echo "Lambda Function: ${lambda_function}"
-
+          echo "DYNAMODB_TABLE=${dynamodb_table}" >> $GITHUB_ENV
       - name: Update Lambda function
         run: |
           aws lambda update-function-code \
