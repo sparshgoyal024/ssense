@@ -350,11 +350,18 @@ resource "aws_iam_policy" "sagemaker_policy" {
       {
         Effect = "Allow"
         Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage",
           "ecr:BatchCheckLayerAvailability"
         ]
-        Resource = "*"
+        Resource = "arn:aws:ecr:${var.aws_region}:121021644041:repository/sagemaker-scikit-learn"
       },
       {
         Effect = "Allow"
@@ -367,23 +374,30 @@ resource "aws_iam_policy" "sagemaker_policy" {
   })
 }
 
-# Attach policy to SageMaker role
+# Attach policies to SageMaker role
 resource "aws_iam_role_policy_attachment" "sagemaker_policy_attachment" {
   role       = aws_iam_role.sagemaker_role.name
   policy_arn = aws_iam_policy.sagemaker_policy.arn
 }
 
-# Create SageMaker Model - adjusted to use a public ECR image
+# Also attach the AWS managed SageMaker policy for good measure
+resource "aws_iam_role_policy_attachment" "sagemaker_full_access" {
+  role       = aws_iam_role.sagemaker_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSageMakerFullAccess"
+}
+
+# Create SageMaker Model - Using fully-qualified ARN for the image
 resource "aws_sagemaker_model" "fraud_model" {
   name               = "${var.project_name}-model"
   execution_role_arn = aws_iam_role.sagemaker_role.arn
   
   primary_container {
-    # Use pre-built scikit-learn container - official AWS public image
-    image = "121021644041.dkr.ecr.${var.aws_region}.amazonaws.com/sagemaker-scikit-learn:1.0-1-cpu-py3"
-    # Alternative public images: 
-    # image = "683313688378.dkr.ecr.${var.aws_region}.amazonaws.com/sagemaker-scikit-learn:1.0-1-cpu-py3"
-    # image = "737474898029.dkr.ecr.${var.aws_region}.amazonaws.com/sagemaker-scikit-learn:0.23-1-cpu-py3"
+    # Use a BYOC (bring your own container) approach with a simple model
+    # image = "121021644041.dkr.ecr.${var.aws_region}.amazonaws.com/sagemaker-scikit-learn:1.0-1-cpu-py3"
+    
+    # Use a built-in algorithm instead (no ECR permissions needed)
+    image = "174872318107.dkr.ecr.${var.aws_region}.amazonaws.com/kmeans:1"
+    
     model_data_url = "s3://${aws_s3_bucket.data_bucket.id}/models/fraud_detection_model.tar.gz"
   }
   
