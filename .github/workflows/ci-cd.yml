@@ -110,24 +110,18 @@ jobs:
           mkdir -p sagemaker_package
           cp src/sagemaker/inference.py sagemaker_package/
           cd sagemaker_package
-          # Create a simple model
-          python -c "
-import json
-import os
-# Create a basic rule-based model config
-model_config = {
-    'location_risk': {
-        'California, USA': 0.2,
-        'New York, USA': 0.2,
-        'London, UK': 0.3,
-        'Tokyo, Japan': 0.5
-    },
-    'threshold': 0.65
-}
-# Save model config
-with open('model_config.json', 'w') as f:
-    json.dump(model_config, f)
-          "
+          
+          # Create a simple model config file directly
+          echo '{
+            "location_risk": {
+              "California, USA": 0.2,
+              "New York, USA": 0.2,
+              "London, UK": 0.3,
+              "Tokyo, Japan": 0.5
+            },
+            "threshold": 0.65
+          }' > model_config.json
+          
           # Create model.tar.gz
           tar -czf ../model.tar.gz .
           cd ..
@@ -185,33 +179,13 @@ with open('model_config.json', 'w') as f:
           echo "Training fraud detection model with historical data..."
           
           # Download historical data from S3
-          aws s3 cp s3://${{ env.TRAINING_BUCKET_NAME }}/historical/sample_transactions.csv ./sample_transactions.csv || {
-            echo "Sample data not found, creating it..."
-            mkdir -p data
-            echo 'transaction_id,user_id,amount,device_type,location,is_vpn,card_type,status,is_fraud
-T1,U1234,120.50,mobile,"California, USA",false,credit,approved,0
-T2,U2345,1500.75,mobile,"Berlin, Germany",true,gift,approved,1
-T3,U3456,50.25,desktop,"New York, USA",false,debit,approved,0
-T4,U4567,2000.00,mobile,"Paris, France",true,credit,declined,1
-T5,U5678,75.30,desktop,"Texas, USA",false,credit,approved,0' > sample_transactions.csv
-          }
+          aws s3 cp s3://${{ env.TRAINING_BUCKET_NAME }}/historical/sample_transactions.csv ./sample_transactions.csv
           
           # Run the training script
           python src/ml/train_model.py \
             --data-path ./sample_transactions.csv \
             --output-dir ./model \
-            --s3-bucket ${{ env.S3_BUCKET }} || {
-            echo "Training failed, creating simple model artifact instead"
-            mkdir -p model_package
-            echo '{
-              "model_type": "rule_based",
-              "threshold": 0.7,
-              "version": "0.1"
-            }' > model_package/model_config.json
-            cp src/sagemaker/inference.py model_package/ || echo "No inference script found"
-            tar -czf model.tar.gz -C model_package . || echo "Failed to create tar.gz"
-            aws s3 cp model.tar.gz s3://${{ env.S3_BUCKET }}/models/fraud_detection_model.tar.gz || echo "Failed to upload model"
-          }
+            --s3-bucket ${{ env.S3_BUCKET }}
           
           # Upload trained model to S3 if the training script didn't do it
           if [ -f "./model/fraud_detection_model.joblib" ]; then
@@ -235,27 +209,8 @@ T5,U5678,75.30,desktop,"Texas, USA",false,credit,approved,0' > sample_transactio
               "version": "0.1"
             }' > model_package/model_config.json
             
-            # Create simple inference script if it doesn't exist
-            if [ ! -f "src/sagemaker/inference.py" ]; then
-              echo 'def model_fn(model_dir):
-    return "rule-based"
-
-def input_fn(request_body, request_content_type="application/json"):
-    import json
-    return json.loads(request_body)
-
-def predict_fn(input_data, model):
-    risk_score = 0.1
-    if "amount" in input_data and input_data["amount"] > 500:
-        risk_score = 0.8
-    return {"is_fraud": risk_score > 0.7, "fraud_probability": risk_score, "risk_score": risk_score}
-
-def output_fn(prediction, response_content_type="application/json"):
-    import json
-    return json.dumps(prediction)' > model_package/inference.py
-            else
-              cp src/sagemaker/inference.py model_package/
-            fi
+            # Copy inference script
+            cp src/sagemaker/inference.py model_package/
             
             # Create tar.gz
             tar -czf model.tar.gz -C model_package .
@@ -264,10 +219,11 @@ def output_fn(prediction, response_content_type="application/json"):
             aws s3 cp model.tar.gz s3://${{ env.S3_BUCKET }}/models/fraud_detection_model.tar.gz
           }
           
-          # SageMaker deployment would normally go here
-          # For the prototype, we'll skip the actual update-model command as it might fail
-          # if the SageMaker resources aren't fully deployed yet
-          echo "SageMaker deployment step completed"
+          # Update SageMaker model
+          aws sagemaker update-model --model-name ${{ env.PROJECT_NAME }}-model \
+            --primary-container ModelDataUrl=s3://${{ env.S3_BUCKET }}/models/fraud_detection_model.tar.gz || {
+            echo "Update model failed, model might not exist yet. Continuing deployment."
+          }
 
       # Notify on completion
       - name: Notify deployment completion
