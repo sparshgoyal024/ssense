@@ -93,20 +93,18 @@ jobs:
             -var="environment=${{ env.ENVIRONMENT }}" \
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="deploy_sagemaker=false"
       
       # Extract Terraform outputs
       - name: Extract Terraform outputs
         id: terraform-outputs
         run: |
           cd terraform
-          echo "KINESIS_STREAM=$(terraform output -raw kinesis_stream_name)" >> $GITHUB_ENV
+          echo "KINESIS_STREAM=fraud-detection-stream" >> $GITHUB_ENV
           echo "S3_BUCKET=$(terraform output -raw s3_bucket_name)" >> $GITHUB_ENV
           echo "TRAINING_BUCKET=$(terraform output -raw training_bucket_name)" >> $GITHUB_ENV
           echo "DYNAMODB_TABLE=$(terraform output -raw dynamodb_table_name)" >> $GITHUB_ENV
           echo "LAMBDA_FUNCTION=$(terraform output -raw lambda_function_name)" >> $GITHUB_ENV
           echo "ALERT_TOPIC_ARN=$(terraform output -raw alert_topic_arn)" >> $GITHUB_ENV
-          echo "SAGEMAKER_ENDPOINT=$(terraform output -raw sagemaker_endpoint_name)" >> $GITHUB_ENV
       
       # Update Lambda function
       - name: Update Lambda function
@@ -116,26 +114,26 @@ jobs:
             --zip-file fileb://lambda_function.zip
       
       # Prepare SageMaker inference script
-      - name: Prepare SageMaker inference script
-        run: |
-          mkdir -p sagemaker_package
-          cp src/sagemaker/inference.py sagemaker_package/
-          cd sagemaker_package
+      # - name: Prepare SageMaker inference script
+      #   run: |
+      #     mkdir -p sagemaker_package
+      #     cp src/sagemaker/inference.py sagemaker_package/
+      #     cd sagemaker_package
           
-          # Create a simple model config file directly
-          echo '{
-            "location_risk": {
-              "California, USA": 0.2,
-              "New York, USA": 0.2,
-              "London, UK": 0.3,
-              "Tokyo, Japan": 0.5
-            },
-            "threshold": 0.65
-          }' > model_config.json
+      #     # Create a simple model config file directly
+      #     echo '{
+      #       "location_risk": {
+      #         "California, USA": 0.2,
+      #         "New York, USA": 0.2,
+      #         "London, UK": 0.3,
+      #         "Tokyo, Japan": 0.5
+      #       },
+      #       "threshold": 0.65
+      #     }' > model_config.json
           
-          # Create model.tar.gz
-          tar -czf ../model.tar.gz .
-          cd ..
+      #     # Create model.tar.gz
+      #     tar -czf ../model.tar.gz .
+      #     cd ..
       
       # Upload model artifacts to S3
       - name: Upload model artifacts to S3
@@ -204,40 +202,40 @@ jobs:
           fi
       
       # Deploy to SageMaker
-      - name: Deploy to SageMaker
-        run: |
-          echo "Deploying model to SageMaker endpoint..."
+      # - name: Deploy to SageMaker
+      #   run: |
+      #     echo "Deploying model to SageMaker endpoint..."
           
-          # Check if model exists in S3
-          aws s3 ls s3://${{ env.S3_BUCKET }}/models/fraud_detection_model.tar.gz || {
-            echo "Model artifact not found in S3. Creating a simple package..."
+      #     # Check if model exists in S3
+      #     aws s3 ls s3://${{ env.S3_BUCKET }}/models/fraud_detection_model.tar.gz || {
+      #       echo "Model artifact not found in S3. Creating a simple package..."
             
-            # Create a simple model package
-            mkdir -p model_package
-            echo '{
-              "model_type": "rule_based",
-              "threshold": 0.7,
-              "version": "0.1"
-            }' > model_package/model_config.json
+      #       # Create a simple model package
+      #       mkdir -p model_package
+      #       echo '{
+      #         "model_type": "rule_based",
+      #         "threshold": 0.7,
+      #         "version": "0.1"
+      #       }' > model_package/model_config.json
             
-            # Copy inference script
-            cp src/sagemaker/inference.py model_package/
+      #       # Copy inference script
+      #       cp src/sagemaker/inference.py model_package/
             
-            # Create tar.gz
-            tar -czf model.tar.gz -C model_package .
+      #       # Create tar.gz
+      #       tar -czf model.tar.gz -C model_package .
             
-            # Upload to S3
-            aws s3 cp model.tar.gz s3://${{ env.S3_BUCKET }}/models/fraud_detection_model.tar.gz
-          }
+      #       # Upload to S3
+      #       aws s3 cp model.tar.gz s3://${{ env.S3_BUCKET }}/models/fraud_detection_model.tar.gz
+      #     }
           
-          # Wait for SageMaker resources to be created by Terraform
-          echo "Waiting for SageMaker resources to be fully created..."
-          sleep 30
+      #     # Wait for SageMaker resources to be created by Terraform
+      #     echo "Waiting for SageMaker resources to be fully created..."
+      #     sleep 30
           
-          # Try to update SageMaker model if it exists
-          aws sagemaker update-endpoint --endpoint-name ${{ env.SAGEMAKER_ENDPOINT }} --endpoint-config-name ${{ env.PROJECT_NAME }}-endpoint-config || {
-            echo "Endpoint update failed, endpoint might still be creating. Continuing deployment."
-          }
+      #     # Try to update SageMaker model if it exists
+      #     aws sagemaker update-endpoint --endpoint-name ${{ env.SAGEMAKER_ENDPOINT }} --endpoint-config-name ${{ env.PROJECT_NAME }}-endpoint-config || {
+      #       echo "Endpoint update failed, endpoint might still be creating. Continuing deployment."
+      #     }
 
       # Notify on completion
       - name: Notify deployment completion
