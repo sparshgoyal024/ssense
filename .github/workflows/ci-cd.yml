@@ -100,10 +100,10 @@ jobs:
           cd terraform
           kinesis_stream=$(terraform output kinesis_stream_name | tr -d '"' | tr -d '\n')
           s3_bucket=$(terraform output s3_bucket_name | tr -d '"' | tr -d '\n')
-          training_bucket=$(terraform output training_bucket_name | tr -d '"' | tr -d '\n')
-          dynamodb_table=$(terraform output dynamodb_table_name | tr -d '"' | tr -d '\n')
-          lambda_function=$(terraform output lambda_function_name | tr -d '"' | tr -d '\n')
-          alert_topic_arn=$(terraform output alert_topic_arn | tr -d '"' | tr -d '\n')
+          training_bucket=ssense
+          dynamodb_table=ssense
+          lambda_function=ssense
+          alert_topic_arn=ssense
 
           echo "KINESIS_STREAM=${kinesis_stream}" >> $GITHUB_ENV
           echo "S3_BUCKET=${s3_bucket}" >> $GITHUB_ENV
