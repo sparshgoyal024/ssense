@@ -28,67 +28,40 @@ ALERT_TOPIC_ARN = os.environ.get('ALERT_TOPIC_ARN', '')
 RISK_THRESHOLD = float(os.environ.get('RISK_THRESHOLD', '0.7'))
 
 def predict_fraud(transaction):
-    """
-    Makes fraud prediction using a simple rule-based approach
-    
-    Args:
-        transaction: Transaction data dictionary
-        
-    Returns:
-        Dictionary with prediction results
-    """
+    """Fraud prediction using rule-based approach or ML model"""
     try:
-        # Simple rule-based prediction without SageMaker
-        amount = transaction.get('amount', 0)
-        device_type = transaction.get('device_type', 'unknown')
-        location = transaction.get('location', 'unknown')
-        is_vpn = transaction.get('is_vpn', False)
-        card_type = transaction.get('card_type', 'unknown')
-        status = transaction.get('status', 'unknown')
+        # Check if SageMaker endpoint exists and should be used
+        sagemaker_endpoint = os.environ.get('SAGEMAKER_ENDPOINT', '')
         
-        # Calculate risk score based on simple rules
-        risk_score = 0.0
-        
-        # Amount-based risk
-        if amount > 1000:
-            risk_score += 0.4
-        elif amount > 500:
-            risk_score += 0.2
-        elif amount > 200:
-            risk_score += 0.1
+        if sagemaker_endpoint and len(sagemaker_endpoint) > 0:
+            # Use ML model if available
+            try:
+                model = get_model()
+                
+                # Convert to DataFrame with required format
+                df = pd.DataFrame([{
+                    'amount': transaction.get('amount', 0),
+                    'device_type': transaction.get('device_type', 'unknown')
+                }])
+                
+                # Make prediction - this assumes our simple model structure
+                fraud_probability = float(model.predict_proba(df)[0, 1])
+                is_fraud = bool(model.predict(df)[0])
+                
+                return {
+                    'transaction_id': transaction['transaction_id'],
+                    'is_fraud': is_fraud,
+                    'fraud_probability': fraud_probability,
+                    'risk_score': fraud_probability
+                }
+            except Exception as model_error:
+                logger.warning(f"Error using ML model: {str(model_error)}. Falling back to rule-based approach.")
+                # Fall back to rule-based approach
+                return rule_based_prediction(transaction)
+        else:
+            # Use rule-based approach
+            return rule_based_prediction(transaction)
             
-        # Device type risk
-        if device_type == 'mobile':
-            risk_score += 0.1
-            
-        # Location risk
-        high_risk_locations = ['Tokyo, Japan', 'Berlin, Germany', 'Paris, France', 'London, UK']
-        if location in high_risk_locations:
-            risk_score += 0.2
-            
-        # VPN risk
-        if is_vpn:
-            risk_score += 0.1
-            
-        # Card type risk
-        if card_type == 'gift':
-            risk_score += 0.2
-            
-        # Status risk
-        if status == 'declined':
-            risk_score += 0.3
-            
-        # Determine if fraudulent based on threshold
-        threshold = float(os.environ.get('RISK_THRESHOLD', 0.7))
-        is_fraud = risk_score >= threshold
-        
-        # Return prediction results
-        return {
-            'transaction_id': transaction['transaction_id'],
-            'is_fraud': is_fraud,
-            'fraud_probability': risk_score,
-            'risk_score': risk_score
-        }
     except Exception as e:
         logger.error(f"Error predicting fraud: {str(e)}")
         # Return default values in case of error
@@ -100,6 +73,61 @@ def predict_fraud(transaction):
             'error': str(e)
         }
 
+def rule_based_prediction(transaction):
+    """Simple rule-based fraud prediction"""
+    # Extract transaction details
+    amount = transaction.get('amount', 0)
+    device_type = transaction.get('device_type', 'unknown')
+    location = transaction.get('location', 'unknown')
+    is_vpn = transaction.get('is_vpn', False)
+    card_type = transaction.get('card_type', 'unknown')
+    status = transaction.get('status', 'unknown')
+    
+    # Calculate risk score based on simple rules
+    risk_score = 0.0
+    
+    # Amount-based risk
+    if amount > 1000:
+        risk_score += 0.4
+    elif amount > 500:
+        risk_score += 0.2
+    elif amount > 200:
+        risk_score += 0.1
+        
+    # Device type risk
+    if device_type == 'mobile':
+        risk_score += 0.1
+        
+    # Location risk
+    high_risk_locations = ['Tokyo, Japan', 'Berlin, Germany', 'Paris, France', 'London, UK']
+    if location in high_risk_locations:
+        risk_score += 0.2
+        
+    # VPN risk
+    if is_vpn:
+        risk_score += 0.1
+        
+    # Card type risk
+    if card_type == 'gift':
+        risk_score += 0.2
+        
+    # Status risk
+    if status == 'declined':
+        risk_score += 0.3
+        
+    # Determine if fraudulent based on threshold
+    threshold = float(os.environ.get('RISK_THRESHOLD', 0.7))
+    is_fraud = risk_score >= threshold
+    
+    # Return prediction results
+    return {
+        'transaction_id': transaction['transaction_id'],
+        'is_fraud': is_fraud,
+        'fraud_probability': risk_score,
+        'risk_score': risk_score,
+        'method': 'rule-based'
+    }
+        
 def store_transaction(transaction, prediction):
     """
     Store transaction and prediction in DynamoDB

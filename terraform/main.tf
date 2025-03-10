@@ -16,6 +16,13 @@ variable "aws_region" {
   default     = "us-west-2"
 }
 
+variable "deploy_sagemaker" {
+  description = "Whether to deploy SageMaker resources"
+  type        = bool
+  default     = false
+}
+
+
 variable "environment" {
   description = "Deployment environment (dev, staging, production)"
   type        = string
@@ -241,7 +248,7 @@ resource "aws_lambda_function" "fraud_detection_lambda" {
       DYNAMODB_TABLE     = aws_dynamodb_table.results_table.name
       ALERT_TOPIC_ARN    = aws_sns_topic.fraud_alerts.arn
       ENVIRONMENT        = var.environment
-      SAGEMAKER_ENDPOINT = var.sagemaker_endpoint
+      SAGEMAKER_ENDPOINT = var.deploy_sagemaker ? aws_sagemaker_endpoint.fraud_endpoint[0].name : ""
       RISK_THRESHOLD     = "0.7"
     }
   }
@@ -388,6 +395,8 @@ resource "aws_iam_role_policy_attachment" "sagemaker_full_access" {
 
 # Create SageMaker Model - Using fully-qualified ARN for the image
 resource "aws_sagemaker_model" "fraud_model" {
+  count = var.deploy_sagemaker ? 1 : 0
+
   name               = "${var.project_name}-model"
   execution_role_arn = aws_iam_role.sagemaker_role.arn
   
@@ -434,7 +443,9 @@ resource "aws_sagemaker_model" "fraud_model" {
 }
 
 # Create SageMaker Endpoint Configuration
-resource "aws_sagemaker_endpoint_configuration" "fraud_endpoint_config" {
+resource "aws_sagemaker_endpoint" "fraud_endpoint" {
+  count = var.deploy_sagemaker ? 1 : 0
+
   name = "${var.project_name}-endpoint-config"
   
   production_variants {
@@ -453,6 +464,8 @@ resource "aws_sagemaker_endpoint_configuration" "fraud_endpoint_config" {
 
 # Create SageMaker Endpoint
 resource "aws_sagemaker_endpoint" "fraud_endpoint" {
+  count = var.deploy_sagemaker ? 1 : 0
+
   name                 = "${var.project_name}-endpoint"
   endpoint_config_name = aws_sagemaker_endpoint_configuration.fraud_endpoint_config.name
   

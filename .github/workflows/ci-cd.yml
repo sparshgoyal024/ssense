@@ -92,7 +92,8 @@ jobs:
           terraform apply -auto-approve \
             -var="environment=${{ env.ENVIRONMENT }}" \
             -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="project_name=${{ env.PROJECT_NAME }}"
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="deploy_sagemaker=false"
       
       # Extract Terraform outputs
       - name: Extract Terraform outputs
