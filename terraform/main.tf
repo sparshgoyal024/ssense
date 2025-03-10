@@ -463,18 +463,6 @@ resource "aws_sagemaker_endpoint" "fraud_endpoint" {
 }
 
 # Create SageMaker Endpoint
-resource "aws_sagemaker_endpoint" "fraud_endpoint" {
-  count = var.deploy_sagemaker ? 1 : 0
-
-  name                 = "${var.project_name}-endpoint"
-  endpoint_config_name = aws_sagemaker_endpoint_configuration.fraud_endpoint_config.name
-  
-  tags = {
-    Name        = "Fraud Detection Endpoint"
-    Environment = var.environment
-    Project     = var.project_name
-  }
-}
 
 # SageMaker Variables
 variable "sagemaker_endpoint" {
