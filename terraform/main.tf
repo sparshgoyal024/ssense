@@ -420,7 +420,9 @@ T5,U5678,75.30,desktop,"Texas, USA",false,credit,approved,0' > sample_transactio
   ]
 }
 
-# Kinesis Data Firehose for streaming to S3 (persistent storage of all transactions)
+# Comment out the problematic Firehose resource for now to get the rest working
+# We can fix and re-add it later
+/*
 resource "aws_kinesis_firehose_delivery_stream" "transaction_delivery_stream" {
   name        = "${var.project_name}-delivery-stream"
   destination = "extended_s3"
@@ -433,20 +435,16 @@ resource "aws_kinesis_firehose_delivery_stream" "transaction_delivery_stream" {
   extended_s3_configuration {
     role_arn           = aws_iam_role.firehose_role.arn
     bucket_arn         = aws_s3_bucket.data_bucket.arn
-    prefix             = "transactions/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/"
+    prefix             = "transactions/"
     buffer_size        = 5
     buffer_interval    = 300
     compression_format = "GZIP"
   }
-  
-  tags = {
-    Name        = "Transaction Delivery Stream"
-    Environment = var.environment
-    Project     = var.project_name
-  }
 }
+*/
 
-# IAM role for Firehose
+# IAM role for Firehose - commenting out since we disabled Firehose
+/*
 resource "aws_iam_role" "firehose_role" {
   name = "${var.project_name}-firehose-role"
   
@@ -511,6 +509,7 @@ resource "aws_iam_role_policy_attachment" "firehose_policy_attachment" {
   role       = aws_iam_role.firehose_role.name
   policy_arn = aws_iam_policy.firehose_policy.arn
 }
+*/
 
 # Output values
 output "kinesis_stream_name" {
