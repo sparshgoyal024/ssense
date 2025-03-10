@@ -2,7 +2,7 @@
 Fraud Detection Lambda Function
 
 This Lambda function processes transaction data from Kinesis,
-invokes the SageMaker endpoint for fraud prediction,
+makes fraud predictions using a rule-based approach,
 and stores results in DynamoDB.
 """
 
@@ -19,19 +19,17 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Initialize AWS clients
-sagemaker_runtime = boto3.client('sagemaker-runtime')
 dynamodb = boto3.resource('dynamodb')
 sns = boto3.client('sns')
 
 # Get environment variables
 DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE', 'fraud-detection-results')
-SAGEMAKER_ENDPOINT = os.environ.get('SAGEMAKER_ENDPOINT', 'fraud-detection-endpoint')
 ALERT_TOPIC_ARN = os.environ.get('ALERT_TOPIC_ARN', '')
 RISK_THRESHOLD = float(os.environ.get('RISK_THRESHOLD', '0.7'))
 
 def predict_fraud(transaction):
     """
-    Makes fraud prediction using SageMaker endpoint
+    Makes fraud prediction using a simple rule-based approach
     
     Args:
         transaction: Transaction data dictionary
@@ -40,34 +38,56 @@ def predict_fraud(transaction):
         Dictionary with prediction results
     """
     try:
-        # Format the transaction for the SageMaker endpoint
-        # Focus on features that matter for fraud detection
-        payload = {
-            'amount': transaction.get('amount', 0),
-            'device_type': transaction.get('device_type', 'unknown'),
-            'location': transaction.get('location', 'unknown'),
-            'is_vpn': transaction.get('is_vpn', False),
-            'card_type': transaction.get('card_type', 'unknown'),
-            'status': transaction.get('status', 'unknown')
-        }
+        # Simple rule-based prediction without SageMaker
+        amount = transaction.get('amount', 0)
+        device_type = transaction.get('device_type', 'unknown')
+        location = transaction.get('location', 'unknown')
+        is_vpn = transaction.get('is_vpn', False)
+        card_type = transaction.get('card_type', 'unknown')
+        status = transaction.get('status', 'unknown')
         
-        # Invoke SageMaker endpoint
-        logger.info(f"Invoking SageMaker endpoint: {SAGEMAKER_ENDPOINT}")
-        response = sagemaker_runtime.invoke_endpoint(
-            EndpointName=SAGEMAKER_ENDPOINT,
-            ContentType='application/json',
-            Body=json.dumps(payload)
-        )
+        # Calculate risk score based on simple rules
+        risk_score = 0.0
         
-        # Parse the response
-        result = json.loads(response['Body'].read().decode())
+        # Amount-based risk
+        if amount > 1000:
+            risk_score += 0.4
+        elif amount > 500:
+            risk_score += 0.2
+        elif amount > 200:
+            risk_score += 0.1
+            
+        # Device type risk
+        if device_type == 'mobile':
+            risk_score += 0.1
+            
+        # Location risk
+        high_risk_locations = ['Tokyo, Japan', 'Berlin, Germany', 'Paris, France', 'London, UK']
+        if location in high_risk_locations:
+            risk_score += 0.2
+            
+        # VPN risk
+        if is_vpn:
+            risk_score += 0.1
+            
+        # Card type risk
+        if card_type == 'gift':
+            risk_score += 0.2
+            
+        # Status risk
+        if status == 'declined':
+            risk_score += 0.3
+            
+        # Determine if fraudulent based on threshold
+        threshold = float(os.environ.get('RISK_THRESHOLD', 0.7))
+        is_fraud = risk_score >= threshold
         
-        # Return prediction results with transaction ID
+        # Return prediction results
         return {
             'transaction_id': transaction['transaction_id'],
-            'is_fraud': result.get('is_fraud', False),
-            'fraud_probability': result.get('fraud_probability', 0.0),
-            'risk_score': result.get('risk_score', 0.0)
+            'is_fraud': is_fraud,
+            'fraud_probability': risk_score,
+            'risk_score': risk_score
         }
     except Exception as e:
         logger.error(f"Error predicting fraud: {str(e)}")

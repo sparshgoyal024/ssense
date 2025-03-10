@@ -105,7 +105,6 @@ jobs:
           echo "DYNAMODB_TABLE=$(terraform output -raw dynamodb_table_name)" >> $GITHUB_ENV
           echo "LAMBDA_FUNCTION=$(terraform output -raw lambda_function_name)" >> $GITHUB_ENV
           echo "ALERT_TOPIC_ARN=$(terraform output -raw alert_topic_arn)" >> $GITHUB_ENV
-          echo "SAGEMAKER_ENDPOINT=$(terraform output -raw sagemaker_endpoint_name)" >> $GITHUB_ENV
       
       # Update Lambda function
       - name: Update Lambda function

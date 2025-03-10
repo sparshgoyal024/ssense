@@ -105,7 +105,7 @@ resource "aws_dynamodb_table" "results_table" {
 
 # SNS Topic for fraud alerts
 resource "aws_sns_topic" "fraud_alerts" {
-  name = "${var.project_name}-alerts"
+  name = "${var.project_name}-alerts-${random_id.suffix.hex}"
   
   tags = {
     Name        = "Fraud Detection Alerts"
@@ -209,7 +209,7 @@ resource "aws_iam_role_policy_attachment" "lambda_policy_attachment" {
   policy_arn = aws_iam_policy.lambda_policy.arn
 }
 
-  # Lambda function for processing transactions
+# Update Lambda function to not rely on SageMaker endpoint
 resource "aws_lambda_function" "fraud_detection_lambda" {
   function_name    = "${var.project_name}-processor"
   role             = aws_iam_role.lambda_role.arn
@@ -232,7 +232,6 @@ resource "aws_lambda_function" "fraud_detection_lambda" {
       DYNAMODB_TABLE     = aws_dynamodb_table.results_table.name
       ALERT_TOPIC_ARN    = aws_sns_topic.fraud_alerts.arn
       ENVIRONMENT        = var.environment
-      SAGEMAKER_ENDPOINT = var.sagemaker_endpoint
       RISK_THRESHOLD     = "0.7"
     }
   }
@@ -280,6 +279,8 @@ resource "aws_cloudwatch_metric_alarm" "fraud_detection_alarm" {
   }
 }
 
+# Comment out SageMaker resources due to ECR permissions issue
+/*
 # SageMaker Resources for Prototyping
 
 # IAM role for SageMaker
@@ -375,6 +376,7 @@ resource "aws_sagemaker_endpoint" "fraud_endpoint" {
     Project     = var.project_name
   }
 }
+*/
 
 # SageMaker Variables
 variable "sagemaker_endpoint" {
@@ -512,6 +514,7 @@ resource "aws_iam_role_policy_attachment" "firehose_policy_attachment" {
 */
 
 # Output values
+# Remove output for SageMaker endpoint since we commented it out
 output "kinesis_stream_name" {
   value = aws_kinesis_stream.transaction_stream.name
   description = "Kinesis Stream Name"
@@ -540,9 +543,4 @@ output "lambda_function_name" {
 output "alert_topic_arn" {
   value = aws_sns_topic.fraud_alerts.arn
   description = "SNS Alert Topic ARN"
-}
-
-output "sagemaker_endpoint_name" {
-  value = aws_sagemaker_endpoint.fraud_endpoint.name
-  description = "SageMaker Endpoint Name"
 }
