@@ -1,77 +1,59 @@
-"""
-Fraud Detection Lambda Function
-
-This Lambda function processes transaction data from Kinesis,
-makes fraud predictions using a rule-based approach,
-and stores results in DynamoDB.
-"""
-
 import json
 import base64
 import boto3
 import os
 import logging
 import time
-from decimal import Decimal
+# Add these imports
+import pandas as pd
+from io import BytesIO
+import joblib
 
 # Set up logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Initialize AWS clients
+s3_client = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
-sns = boto3.client('sns')
 
 # Get environment variables
-DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE', 'fraud-detection-results')
-ALERT_TOPIC_ARN = os.environ.get('ALERT_TOPIC_ARN', '')
-RISK_THRESHOLD = float(os.environ.get('RISK_THRESHOLD', '0.7'))
+S3_BUCKET = os.environ.get('S3_BUCKET', '')
+DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE', '')
 
-def predict_fraud(transaction):
-    """Fraud prediction using rule-based approach or ML model"""
-    try:
-        # Check if SageMaker endpoint exists and should be used
-        sagemaker_endpoint = os.environ.get('SAGEMAKER_ENDPOINT', '')
-        
-        if sagemaker_endpoint and len(sagemaker_endpoint) > 0:
-            # Use ML model if available
-            try:
-                model = get_model()
-                
-                # Convert to DataFrame with required format
-                df = pd.DataFrame([{
-                    'amount': transaction.get('amount', 0),
-                    'device_type': transaction.get('device_type', 'unknown')
-                }])
-                
-                # Make prediction - this assumes our simple model structure
-                fraud_probability = float(model.predict_proba(df)[0, 1])
-                is_fraud = bool(model.predict(df)[0])
-                
-                return {
-                    'transaction_id': transaction['transaction_id'],
-                    'is_fraud': is_fraud,
-                    'fraud_probability': fraud_probability,
-                    'risk_score': fraud_probability
-                }
-            except Exception as model_error:
-                logger.warning(f"Error using ML model: {str(model_error)}. Falling back to rule-based approach.")
-                # Fall back to rule-based approach
-                return rule_based_prediction(transaction)
-        else:
-            # Use rule-based approach
-            return rule_based_prediction(transaction)
+# Path to the ML model in S3
+MODEL_PATH = 'models/fraud_detection_model.joblib'
+
+# Global variable to cache the model
+model = None
+
+def get_model():
+    """Loads the ML model from S3 or returns cached model"""
+    global model
+    if model is None:
+        try:
+            # Check if SageMaker endpoint exists
+            sagemaker_endpoint = os.environ.get('SAGEMAKER_ENDPOINT', '')
             
-    except Exception as e:
-        logger.error(f"Error predicting fraud: {str(e)}")
-        # Return default values in case of error
-        return {
-            'transaction_id': transaction['transaction_id'],
-            'is_fraud': False,
-            'fraud_probability': 0.0,
-            'risk_score': 0.0,
-            'error': str(e)
-        }
+            if sagemaker_endpoint and len(sagemaker_endpoint) > 0:
+                # Download model from S3
+                logger.info(f"Downloading model from s3://{S3_BUCKET}/{MODEL_PATH}")
+                obj = s3_client.get_object(Bucket=S3_BUCKET, Key=MODEL_PATH)
+                model_bytes = obj['Body'].read()
+                
+                # Load the model
+                model = joblib.load(BytesIO(model_bytes))
+                logger.info("Model loaded successfully")
+            else:
+                # Return a dummy model for rule-based approach
+                logger.info("Using rule-based model (no SageMaker endpoint)")
+                model = "rule-based"
+        except Exception as e:
+            logger.error(f"Error loading model: {str(e)}")
+            # Return a dummy model for rule-based approach
+            logger.info("Falling back to rule-based model")
+            model = "rule-based"
+    return model
 
 def rule_based_prediction(transaction):
     """Simple rule-based fraud prediction"""
@@ -127,94 +109,75 @@ def rule_based_prediction(transaction):
         'risk_score': risk_score,
         'method': 'rule-based'
     }
+
+def predict_fraud(transaction):
+    """Fraud prediction using rule-based approach or ML model"""
+    try:
+        # Get model (will be either ML model or "rule-based")
+        model = get_model()
         
+        # If we have a real model, use it
+        if model != "rule-based":
+            try:
+                # Convert to DataFrame with required format
+                df = pd.DataFrame([{
+                    'amount': transaction.get('amount', 0),
+                    'device_type': transaction.get('device_type', 'unknown')
+                }])
+                
+                # Make prediction
+                fraud_probability = float(model.predict_proba(df)[0, 1])
+                is_fraud = bool(model.predict(df)[0])
+                
+                return {
+                    'transaction_id': transaction['transaction_id'],
+                    'is_fraud': is_fraud,
+                    'fraud_probability': fraud_probability,
+                    'risk_score': fraud_probability,
+                    'method': 'ml-model'
+                }
+            except Exception as e:
+                logger.error(f"Error using ML model: {str(e)}")
+                # Fall back to rule-based approach
+                return rule_based_prediction(transaction)
+        else:
+            # Use rule-based approach
+            return rule_based_prediction(transaction)
+            
+    except Exception as e:
+        logger.error(f"Error predicting fraud: {str(e)}")
+        # Return default values in case of error
+        return {
+            'transaction_id': transaction['transaction_id'],
+            'is_fraud': False,
+            'fraud_probability': 0.0,
+            'risk_score': 0.0,
+            'error': str(e)
+        }
+
 def store_transaction(transaction, prediction):
-    """
-    Store transaction and prediction in DynamoDB
-    
-    Args:
-        transaction: Transaction data dictionary
-        prediction: Prediction results dictionary
-        
-    Returns:
-        None
-    """
+    """Store transaction and prediction in DynamoDB"""
     try:
         table = dynamodb.Table(DYNAMODB_TABLE)
         
-        # Combine transaction and prediction
-        item = {**transaction, **prediction}
-        
-        # Convert float values to Decimal for DynamoDB
-        for key, value in item.items():
-            if isinstance(value, float):
-                item[key] = Decimal(str(value))
+        # Add prediction results to transaction
+        transaction_item = {**transaction, **prediction}
         
         # Add timestamp for TTL (30 days from now)
-        item['ttl'] = int(time.time()) + (30 * 24 * 60 * 60)
+        transaction_item['ttl'] = int(time.time()) + (30 * 24 * 60 * 60)
         
         # Store in DynamoDB
-        table.put_item(Item=item)
+        table.put_item(Item=transaction_item)
         logger.info(f"Stored transaction {transaction['transaction_id']} in DynamoDB")
             
     except Exception as e:
         logger.error(f"Error storing transaction: {str(e)}")
 
-def send_alert(transaction, prediction):
-    """
-    Send alert for fraudulent transaction
-    
-    Args:
-        transaction: Transaction data dictionary
-        prediction: Prediction results dictionary
-        
-    Returns:
-        None
-    """
-    if not ALERT_TOPIC_ARN:
-        return
-        
-    try:
-        # Create alert message
-        message = {
-            'alert_type': 'FRAUD_DETECTED',
-            'transaction_id': transaction['transaction_id'],
-            'user_id': transaction['user_id'],
-            'amount': transaction['amount'],
-            'timestamp': transaction['timestamp'],
-            'location': transaction['location'],
-            'fraud_probability': prediction['fraud_probability'],
-            'risk_score': prediction['risk_score']
-        }
-        
-        # Send to SNS
-        sns.publish(
-            TopicArn=ALERT_TOPIC_ARN,
-            Message=json.dumps(message),
-            Subject=f"FRAUD ALERT: Transaction {transaction['transaction_id']}"
-        )
-        logger.info(f"Sent fraud alert for transaction {transaction['transaction_id']}")
-        
-    except Exception as e:
-        logger.error(f"Error sending alert: {str(e)}")
-
 def handler(event, context):
-    """
-    Lambda handler function
+    """Lambda handler function"""
+    logger.info(f"Processing {len(event['Records'])} records")
     
-    Args:
-        event: AWS Lambda event object
-        context: AWS Lambda context object
-        
-    Returns:
-        Dictionary with processing results
-    """
-    logger.info(f"Processing {len(event.get('Records', []))} records")
-    
-    processed_count = 0
-    fraud_count = 0
-    
-    for record in event.get('Records', []):
+    for record in event['Records']:
         try:
             # Decode Kinesis data
             payload = base64.b64decode(record['kinesis']['data']).decode('utf-8')
@@ -231,23 +194,14 @@ def handler(event, context):
             # Log prediction results
             logger.info(f"Transaction {transaction['transaction_id']} - Fraud probability: {prediction['fraud_probability']}")
             
-            # If fraudulent and above threshold, send alert
-            if prediction['is_fraud'] or prediction.get('risk_score', 0) > RISK_THRESHOLD:
-                fraud_count += 1
+            # If fraudulent, take immediate action
+            if prediction['is_fraud']:
                 logger.warning(f"FRAUD DETECTED: Transaction {transaction['transaction_id']} from user {transaction['user_id']}")
-                send_alert(transaction, prediction)
-                
-            processed_count += 1
                 
         except Exception as e:
             logger.error(f"Error processing record: {str(e)}")
     
-    logger.info(f"Processed {processed_count} transactions, detected {fraud_count} fraudulent")
-    
     return {
         'statusCode': 200,
-        'body': json.dumps({
-            'processed': processed_count,
-            'fraudulent': fraud_count
-        })
+        'body': json.dumps(f"Processed {len(event['Records'])} transactions")
     }

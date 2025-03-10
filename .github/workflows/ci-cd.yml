@@ -99,12 +99,13 @@ jobs:
         id: terraform-outputs
         run: |
           cd terraform
-          kinesis_stream=$(terraform output -raw kinesis_stream_name 2>&1 | grep -v "::debug::" | tr -d '\n')
-          s3_bucket=$(terraform output -raw s3_bucket_name 2>&1 | grep -v "::debug::" | tr -d '\n')
-          training_bucket=$(terraform output -raw training_bucket_name 2>&1 | grep -v "::debug::" | tr -d '\n')
-          dynamodb_table=$(terraform output -raw dynamodb_table_name 2>&1 | grep -v "::debug::" | tr -d '\n')
-          lambda_function=$(terraform output -raw lambda_function_name 2>&1 | grep -v "::debug::" | tr -d '\n')
-          alert_topic_arn=$(terraform output -raw alert_topic_arn 2>&1 | grep -v "::debug::" | tr -d '\n')
+# Extract outputs without using -raw which is causing issues
+          kinesis_stream=$(terraform output kinesis_stream_name | tr -d '"' | tr -d '\n')
+          s3_bucket=$(terraform output s3_bucket_name | tr -d '"' | tr -d '\n')
+          training_bucket=$(terraform output training_bucket_name | tr -d '"' | tr -d '\n')
+          dynamodb_table=$(terraform output dynamodb_table_name | tr -d '"' | tr -d '\n')
+          lambda_function=$(terraform output lambda_function_name | tr -d '"' | tr -d '\n')
+          alert_topic_arn=$(terraform output alert_topic_arn | tr -d '"' | tr -d '\n')
 
           echo "KINESIS_STREAM=${kinesis_stream}" >> $GITHUB_ENV
           echo "S3_BUCKET=${s3_bucket}" >> $GITHUB_ENV
@@ -116,7 +117,7 @@ jobs:
       - name: Update Lambda function
         run: |
           aws lambda update-function-code \
-            --function-name ${{ env.LAMBDA_FUNCTION }} \
+            --function-name ${lambda_function}  \
             --zip-file fileb://lambda_function.zip
       
       # Prepare SageMaker inference script
