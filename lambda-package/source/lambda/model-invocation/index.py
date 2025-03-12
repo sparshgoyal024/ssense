@@ -50,8 +50,7 @@ def extract_features(transaction):
         'amount': float(transaction.get('amount', 0)),
         'device_type': transaction.get('device_type', 'unknown'),
         'is_vpn': 1 if transaction.get('is_vpn', False) else 0,
-        'card_type': transaction.get('card_type', 'unknown'),
-        'status': transaction.get('status', 'approved')
+        'card_type': transaction.get('card_type', 'unknown')
     }
     
     # Extract time-based features
@@ -63,30 +62,23 @@ def extract_features(transaction):
         features['hour_of_day'] = timestamp.hour
         features['day_of_week'] = timestamp.weekday()
         features['is_weekend'] = 1 if timestamp.weekday() >= 5 else 0
-        features['is_night'] = 1 if (timestamp.hour < 6 or timestamp.hour >= 22) else 0
     except Exception as e:
         logger.warning(f"Error parsing timestamp: {str(e)}")
         features['hour_of_day'] = 0
         features['day_of_week'] = 0
         features['is_weekend'] = 0
-        features['is_night'] = 0
     
     # Calculate location risk
     features['location_risk'] = calculate_location_risk(transaction.get('location', 'Unknown'))
     
-    # User transaction count (mock value in real system would query history)
-    features['user_transaction_count'] = 5
-    
-    # Amount z-score (mock calculation)
-    features['amount_zscore'] = (features['amount'] - 200) / 100 if features['amount'] > 0 else 0
-    
-    # Calculate risk score
-    features['transaction_risk_score'] = (
+    # Calculate a simple risk score based on features
+    risk_score = (
         (features['amount'] / 1000) * 0.3 +
         features['is_vpn'] * 0.2 +
         features['location_risk'] * 0.3 +
         (1 if transaction.get('status') == 'declined' else 0) * 0.2
     )
+    features['risk_score'] = min(1.0, risk_score)
     
     return features
 
@@ -100,24 +92,36 @@ def format_features_for_prediction(features):
         'unknown': 3
     }
     
-    device_type_value = device_type_mapping.get(features['device_type'], 3)
+    device_type_value = device_type_mapping.get(features.get('device_type', 'unknown'), 3)
     
     # Prepare all features in correct order as used during training
+    # Make sure there are exactly 38 features in the correct order
     feature_list = [
-        str(features['amount']),
+        str(features.get('amount', 0)),
         str(features.get('hour_of_day', 0)),
         str(features.get('day_of_week', 0)),
+        str(features.get('month', 1)),
+        str(features.get('day_of_month', 1)),
         str(features.get('is_weekend', 0)),
         str(features.get('is_night', 0)),
-        str(features.get('location_risk', 0.5)),
         str(features.get('is_vpn', 0)),
-        str(features.get('user_transaction_count', 1)),  # Default to 1
+        str(features.get('user_transaction_count', 1)),
+        str(features.get('user_avg_amount', 0)),
+        str(features.get('user_amount_std', 0)),
+        str(features.get('user_min_amount', 0)),
+        str(features.get('user_max_amount', 0)),
+        str(features.get('user_vpn_ratio', 0)),
         str(features.get('amount_zscore', 0)),
-        str(features.get('transaction_risk_score', 0))
+        str(features.get('amount_to_max_ratio', 0)),
+        str(features.get('location_fraud_rate', 0)),
+        str(features.get('device_fraud_rate', 0)),
+        str(features.get('card_fraud_rate', 0)),
+        str(features.get('is_unusual_amount', 0)),
+        str(features.get('is_new_user', 0)),
+        str(features.get('is_largest_tx', 0)),
     ]
     
     # Add one-hot encoded values for device_type
-    # Assuming these match the order in your training data
     device_types = ['mobile', 'desktop', 'tablet']
     for dtype in device_types:
         feature_list.append('1' if features.get('device_type') == dtype else '0')
@@ -132,6 +136,26 @@ def format_features_for_prediction(features):
     for status in statuses:
         feature_list.append('1' if features.get('status') == status else '0')
     
+    # Add one-hot encoded values for locations (assuming 10 possible locations)
+    locations = [
+        'california_usa', 'new_york_usa', 'texas_usa', 'florida_usa', 
+        'illinois_usa', 'london_uk', 'paris_france', 'berlin_germany', 
+        'tokyo_japan', 'sydney_australia'
+    ]
+    for loc in locations:
+        normalized_location = features.get('location', '').replace(', ', '_').lower()
+        feature_list.append('1' if normalized_location == loc else '0')
+    
+    # Make sure we have exactly 38 features
+    if len(feature_list) < 38:
+        # Pad with zeros if needed
+        feature_list.extend(['0'] * (38 - len(feature_list)))
+    elif len(feature_list) > 38:
+        # Trim if too many
+        feature_list = feature_list[:38]
+    
+    logger.info(f"Feature count for prediction: {len(feature_list)}")
+    
     return ','.join(feature_list)
 
 def predict_fraud(transaction, features):
@@ -139,6 +163,9 @@ def predict_fraud(transaction, features):
     try:
         # Format features for prediction
         features_csv = format_features_for_prediction(features)
+        
+        # Log the feature count to debug
+        logger.info(f"Sending {features_csv.count(',') + 1} features to endpoint")
         
         # Invoke SageMaker endpoint
         logger.info(f"Invoking endpoint: {ENDPOINT_NAME} with features: {features_csv}")
@@ -164,11 +191,11 @@ def predict_fraud(transaction, features):
         }
     except Exception as e:
         logger.error(f"Error invoking SageMaker endpoint: {str(e)}")
-        # Fallback to rule-based prediction using risk score
+        # Fall back to rule-based prediction
         return {
             'transaction_id': transaction['transaction_id'],
-            'fraud_probability': features['risk_score'],
-            'is_fraud': features['risk_score'] > 0.7,
+            'fraud_probability': features.get('transaction_risk_score', 0.5),
+            'is_fraud': features.get('transaction_risk_score', 0) > 0.7,
             'prediction_timestamp': datetime.datetime.now().isoformat(),
             'error': str(e),
             'feature_values': features
