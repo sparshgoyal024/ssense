@@ -24,7 +24,7 @@ s3_bucket = 'fraudassessmentssensemodel'  # Replace with your bucket name
 
 # Start the processing job
 processing_job = script_processor.run(
-    code='fraud_detection_processor.py',
+    code='sagemaker_fraud_detection.py',
     arguments=[
         '--stack-name', stack_name,
         '--s3-bucket', s3_bucket,
