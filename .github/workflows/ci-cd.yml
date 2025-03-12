@@ -77,56 +77,8 @@ jobs:
       - run: |
           aws cloudformation validate-template --template-body file://cf.template
 
-  build-lambda:
+  copy-files-to-s3:
     needs: validate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f lambda-package/requirements.txt ]; then pip install -r lambda-package/requirements.txt; fi
-      
-      - name: Build Lambda package
-        run: |
-          mkdir -p build
-          cd lambda-package
-          zip -r ../build/fraud_detection.zip source/lambda/model-invocation/index.py
-          cd ..
-      
-      - name: Upload Lambda artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: lambda-package
-          path: build/fraud_detection.zip
-
-  build-notebook:
-    needs: validate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Package notebook code
-        run: |
-          mkdir -p build
-          cp -r notebook-package/source/notebooks build/
-          cp -r notebook-package/src build/
-          cp notebook-package/on-start.sh build/
-      
-      - name: Upload notebook artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: notebook-package
-          path: build/
-
-  deploy-to-s3:
-    needs: [build-lambda, build-notebook]
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -138,18 +90,6 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Download lambda package
-        uses: actions/download-artifact@v4
-        with:
-          name: lambda-package
-          path: ./lambda-dist
-      
-      - name: Download notebook package
-        uses: actions/download-artifact@v4
-        with:
-          name: notebook-package
-          path: ./notebook-dist
       
       - name: Create S3 buckets if they don't exist
         run: |
@@ -165,26 +105,46 @@ jobs:
             aws s3api put-bucket-encryption --bucket ${NOTEBOOK_CODE_BUCKET} --server-side-encryption-configuration '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}'
           fi
       
-      - name: Upload Lambda code to S3
+      - name: Zip Lambda package
         run: |
-          aws s3 cp ./lambda-dist/fraud_detection.zip s3://${LAMBDA_CODE_BUCKET}/fraud-detection/lambda/fraud_detection.zip
+          cd lambda-package/source/lambda/model-invocation
+          zip -r ../../../../fraud_detection.zip index.py
+          cd ../../../../
       
-      - name: Upload Notebook code to S3
+      - name: Copy files directly to S3
         run: |
-          aws s3 cp ./notebook-dist/notebooks/sagemaker_fraud_detection.ipynb s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/sagemaker_fraud_detection.ipynb
-          aws s3 cp ./notebook-dist/on-start.sh s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/on-start.sh
+          # Copy Lambda code to S3
+          aws s3 cp fraud_detection.zip s3://${LAMBDA_CODE_BUCKET}/fraud-detection/lambda/fraud_detection.zip
           
-          # Copy the utility files
-          if [ -d "./notebook-dist/src/package" ]; then
-            aws s3 cp ./notebook-dist/src/package/generator.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/generator.py
-            aws s3 cp ./notebook-dist/src/package/utils.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/utils.py
-            if [ -f "./notebook-dist/src/package/generate_endpoint_traffic.py" ]; then
-              aws s3 cp ./notebook-dist/src/package/generate_endpoint_traffic.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/generate_endpoint_traffic.py
-            fi
+          # Copy Notebook files to S3
+          aws s3 cp notebook-package/source/notebooks/sagemaker_fraud_detection.ipynb s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/sagemaker_fraud_detection.ipynb
+          aws s3 cp notebook-package/on-start.sh s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/on-start.sh
+          
+          # Copy additional notebook files if they exist
+          if [ -f "notebook-package/source/notebooks/endpoint_demo.ipynb" ]; then
+            aws s3 cp notebook-package/source/notebooks/endpoint_demo.ipynb s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/endpoint_demo.ipynb
+          fi
+          
+          if [ -f "notebook-package/requirements.txt" ]; then
+            aws s3 cp notebook-package/requirements.txt s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/requirements.txt
+          fi
+          
+          # Copy package files
+          if [ -d "notebook-package/src/package" ]; then
+            aws s3 cp notebook-package/src/package/generator.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/generator.py
+            aws s3 cp notebook-package/src/package/utils.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/utils.py
+            aws s3 cp notebook-package/src/package/config.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/config.py
+            aws s3 cp notebook-package/src/package/generator.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/generator.py
+          fi
+          
+          if [ -d "notebook-package/source/notebooks/src/package" ]; then
+            aws s3 cp notebook-package/source/notebooks/src/package/generate_endpoint_traffic.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/generate_endpoint_traffic.py
+          elif [ -d "notebook-package/src/package" ]; then
+            aws s3 cp notebook-package/src/package/generate_endpoint_traffic.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/generate_endpoint_traffic.py
           fi
   
   deploy-cloudformation:
-    needs: deploy-to-s3
+    needs: copy-files-to-s3
     runs-on: ubuntu-latest
     environment: production
     steps:
