@@ -137,11 +137,6 @@ jobs:
             aws s3 cp notebook-package/src/package/generator.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/generator.py
           fi
           
-          if [ -d "notebook-package/source/notebooks/src/package" ]; then
-            aws s3 cp notebook-package/source/notebooks/src/package/generate_endpoint_traffic.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/generate_endpoint_traffic.py
-          elif [ -d "notebook-package/src/package" ]; then
-            aws s3 cp notebook-package/src/package/generate_endpoint_traffic.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/generate_endpoint_traffic.py
-          fi
   
   deploy-cloudformation:
     needs: copy-files-to-s3
