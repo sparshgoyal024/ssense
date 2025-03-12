@@ -2,6 +2,8 @@
 
 this is documentation for real-time fraud detection pipeline that detects potentially fraudulent transactions for e-commerce company. system processes transaction data, analyzes patterns, and flags suspicious activities using machine learning model.
 
+[!Link to demo]](https://www.loom.com/share/7514575101bb489b8ae7ed9b88c798eb?sid=ccecff9d-0250-4592-ae5c-f714e59f3757)
+
 ## System architecture
 
 ```mermaid
