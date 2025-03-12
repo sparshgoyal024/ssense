@@ -75,7 +75,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       
       - run: |
-          aws cloudformation validate-template --template-body file://cf.template
+          aws cloudformation validate-template --template-body file://cf3.json
 
   copy-files-to-s3:
     needs: validate
