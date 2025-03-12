@@ -52,6 +52,79 @@ graph TD
 - **sagemaker_fraud_detection.ipynb**: notebook for model development and training
 - **config.py**: configuration values used across environment
 
+# implementation steps
+
+follow these steps to replicate this fraud detection system in your own environment:
+
+## 1. repository setup
+
+```bash
+# clone the repository
+git clone https://github.com/sparshgoyal024/ssense.git
+main branch
+```
+
+## 2. configure github secrets
+
+in your github repository, go to settings > secrets and add:
+
+- `AWS_ACCESS_KEY_ID`: your aws access key
+- `AWS_SECRET_ACCESS_KEY`: your aws secret key
+- `AWS_REGION`: your preferred aws region (e.g., us-west-2)
+
+### Create a environment
+
+- `ENVIRONMENT`: set as "production"
+
+## 3. deploy infrastructure
+
+push changes to the main branch to trigger the ci/cd pipeline:
+
+```bash
+git add .
+git commit -m "initial deployment"
+git push origin main
+```
+
+monitor github actions tab to see deployment progress. the pipeline will:
+1. upload code files artifacts to s3
+2. deploy cloudformation template
+3. setup required aws resources
+4. build and trigger lambda code for historical data
+
+you may need to manually approve deployment at certain pipeline steps.
+
+## 4. train the model
+
+1. navigate to aws console > sagemaker > notebook instances
+2. find and open the created notebook instance
+3. open `sagemaker_fraud_detection.ipynb`
+4. execute each cell sequentially to:
+   - generate historical data
+   - perform feature engineering
+   - train the xgboost model
+   - deploy the model to a sagemaker endpoint
+   - evaluate model performance
+
+this is a manual step that could be automated in future versions.
+
+## 5. test the system
+
+1. use the notebook to generate test transactions:
+
+```python
+# Generate a batch of transactions to test the system
+test_transactions = generate_test_transactions(10, fraud_ratio=0.3)
+send_transactions_to_kinesis(test_transactions)
+```
+
+2. check dynamodb to verify transaction processing:
+   - go to aws console > dynamodb > tables
+   - select the created table (ssense-fraud-transactions)
+   - explore items to see processed transactions with fraud predictions
+
+3. verify sns notifications by checking the email inbox linked to the sns topic
+
 ## Features engineering
 
 ### transaction-based features
