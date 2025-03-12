@@ -118,8 +118,8 @@ jobs:
           
           # Copy Notebook files to S3
           aws s3 cp notebook-package/source/notebooks/sagemaker_fraud_detection.ipynb s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/sagemaker_fraud_detection.ipynb
-          aws s3 cp notebook-package/source/notebooks/config.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/config.py
-          aws s3 cp notebook-package/source/notebooks/utils.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/utils.py
+          aws s3 cp notebook-package/source/notebooks/src/package/config.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/config.py
+          aws s3 cp notebook-package/source/notebooks/src/package/utils.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/utils.py
           aws s3 cp notebook-package/on-start.sh s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/on-start.sh
           
           
