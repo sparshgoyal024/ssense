@@ -1,6 +1,41 @@
-name: Fraud Detection CI/CD Pipeline Ssense
+wait-for-input:
+    needs: [build-lambda, build-notebook]
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
+    steps:
+      - name: Wait for deployment parameters
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.GITHUB_TOKEN }}
+          approvers: ${{ github.actor }}
+          minimum-approvals: 1
+          issue-title: "Deployment Parameters Required"
+          issue-body: |
+            Automated build completed successfully and is ready for deployment.
+            
+            Please provide the following deployment parameters by running this workflow manually:
+            - S3 Bucket for ML model and training data
+            - S3 Bucket for processed transactions
+            - DynamoDB table name
+            - Kinesis Stream name
+            - Email for fraud alerts
+            
+            Go to Actions → Fraud Detection CI/CD Pipeline → Run workflow → Fill in parameters → Run workflow
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            build
+            lambda-dist
+            notebook-distname: Fraud Detection CI/CD Pipeline
 
 on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       s3_bucket_name1:
@@ -118,6 +153,8 @@ jobs:
     needs: [build-lambda, build-notebook]
     runs-on: ubuntu-latest
     environment: production
+    # Skip if triggered by push/pull request without parameters
+    if: github.event_name == 'workflow_dispatch' || (github.event_name != 'workflow_dispatch' && github.actor == 'wait-for-input')
     steps:
       - uses: actions/checkout@v3
       
