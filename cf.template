@@ -131,7 +131,7 @@
             }
           ],
           "KeySchema": [
-            {
+            { 
               "AttributeName": "transaction_id",
               "KeyType": "HASH"
             }
