@@ -174,32 +174,64 @@ jobs:
           outputs=$(aws cloudformation describe-stacks --stack-name fraudssenseassessment --query 'Stacks[0].Outputs' --output json)
           echo "cfn_outputs=$(echo $outputs | jq -c)" >> $GITHUB_OUTPUT
           echo "Deployed stack with outputs: $outputs"
+
+
+  deploy-cloudformation-cf2:
+    needs: deploy-cloudformation
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v3
       
-      - name: Create deployment summary
-        run: |
-          echo "### Fraud Detection Pipeline Deployment Summary" > deployment_summary.md
-          echo "- Stack Name: fraudssenseassessment" >> deployment_summary.md
-          echo "- Region: ${{ env.AWS_REGION }}" >> deployment_summary.md
-          echo "- Deployment Time: $(date)" >> deployment_summary.md
-          echo "" >> deployment_summary.md
-          
-          echo "#### Stack Outputs" >> deployment_summary.md
-          echo '```json' >> deployment_summary.md
-          echo '${{ steps.cfn-outputs.outputs.cfn_outputs }}' >> deployment_summary.md
-          echo '```' >> deployment_summary.md
-          
-          echo "#### Resources Created" >> deployment_summary.md
-          echo "- SageMaker Notebook Instance for model training" >> deployment_summary.md
-          echo "- Lambda function for transaction processing" >> deployment_summary.md
-          echo "- Kinesis Data Stream for data ingestion" >> deployment_summary.md
-          echo "- DynamoDB table for transaction storage" >> deployment_summary.md
-          echo "- SNS Topic for fraud alerts" >> deployment_summary.md
-          echo "- S3 Buckets for model storage and results" >> deployment_summary.md
-          
-          cat deployment_summary.md
-      
-      - name: Upload deployment summary
-        uses: actions/upload-artifact@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
         with:
-          name: deployment-summary
-          path: deployment_summary.md
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Deploy CloudFormation cf2 stack
+        run: |
+          aws cloudformation deploy \
+            --template-file cf2.template \
+            --stack-name fraudssenseassessment-datagenerator \
+            --parameter-overrides \
+              ModelDataBucketName=ssense-fraud-model-data \
+              DataPrefix=historical-data \
+              NumTransactions=50000 \
+              FraudRatio=0.1 \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset
+
+
+  invoke-data-generator-lambda:
+    needs: deploy-cloudformation-cf2
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get Lambda function name from CloudFormation outputs
+        id: get-lambda-name
+        run: |
+          LAMBDA_NAME=$(aws cloudformation describe-stacks --stack-name fraudssenseassessment-datagenerator \
+            --query "Stacks[0].Outputs[?OutputKey=='DataGeneratorLambdaName'].OutputValue" \
+            --output text)
+          echo "LAMBDA_NAME=$LAMBDA_NAME" >> $GITHUB_ENV
+          echo "Lambda function to invoke: $LAMBDA_NAME"
+
+      - name: Invoke the Lambda function
+        run: |
+          aws lambda invoke \
+            --function-name "$LAMBDA_NAME" \
+            --invocation-type Event \
+            --payload '{}' \
+            response.json
+          echo "Lambda function $LAMBDA_NAME triggered successfully."
