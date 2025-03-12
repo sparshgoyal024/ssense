@@ -101,7 +101,7 @@ def generate_transaction(fraud_probability=0.05):
     
     return transaction
 
-def send_to_kinesis(transaction, stream_name, region="us-east-1"):
+def send_to_kinesis(transaction, stream_name, region="us-west-2"):
     """Send transaction to Kinesis Data Stream"""
     try:
         kinesis = boto3.client('kinesis', region_name=region)
@@ -121,7 +121,7 @@ def send_to_kinesis(transaction, stream_name, region="us-east-1"):
         print(f"Error sending to Kinesis: {str(e)}")
         return None
 
-def send_batch_to_kinesis(transactions, stream_name, region="us-east-1"):
+def send_batch_to_kinesis(transactions, stream_name, region="us-west-2"):
     """Send a batch of transactions to Kinesis Data Stream"""
     try:
         kinesis = boto3.client('kinesis', region_name=region)
@@ -170,7 +170,7 @@ def main():
                       help='Output mode: send to Kinesis, write to file, or both')
     parser.add_argument('--stream', default='ssense-transaction-stream',
                       help='Kinesis stream name (for kinesis mode)')
-    parser.add_argument('--region', default='us-east-1',
+    parser.add_argument('--region', default='us-west-2',
                       help='AWS region for Kinesis stream')
     parser.add_argument('--file', default='transactions.jsonl',
                       help='Output filename (for file mode)')
