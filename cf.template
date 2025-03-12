@@ -179,7 +179,7 @@
         "Type": "AWS::SageMaker::NotebookInstance",
         "Properties": {
           "InstanceType": "ml.t3.large",
-          "NotebookInstanceName": "SsenseFraudDetection1",
+          "NotebookInstanceName": "SsenseFraudDetection",
           "RoleArn": {
             "Fn::GetAtt": [
               "NotebookInstanceExecutionRole",
