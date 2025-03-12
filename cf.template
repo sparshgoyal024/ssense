@@ -748,8 +748,7 @@
           "StartingPosition": "LATEST"
         }
       }    
-    },
-    
+    ,
     "Outputs": {
       "BasicNotebookInstanceId": {
         "Value": { "Ref": "BasicNotebookInstance" }
