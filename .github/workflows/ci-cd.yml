@@ -110,12 +110,21 @@ jobs:
           cd lambda-package/source/lambda/model-invocation
           zip -r ../../../../fraud_detection.zip index.py
           cd ../../../../
+
+      - name: Zip Generator Lambda package
+        run: |
+          cd notebook-package/source/notebooks/src/package
+          zip -r ../../../../../generator.zip generator.py
+          cd ../../../../../
+          
+      # And then add to your S3 copy step:
       
       - name: Copy files directly to S3
         run: |
           # Copy Lambda code to S3
           aws s3 cp fraud_detection.zip s3://${LAMBDA_CODE_BUCKET}/fraud-detection/lambda/fraud_detection.zip
-          
+          aws s3 cp generator.zip s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/lambda/generator.zip
+
           # Copy Notebook files to S3
           aws s3 cp notebook-package/source/notebooks/sagemaker_fraud_detection.ipynb s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/sagemaker_fraud_detection.ipynb
           aws s3 cp notebook-package/source/notebooks/src/package/config.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/config.py

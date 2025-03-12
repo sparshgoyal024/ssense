@@ -283,9 +283,9 @@
          }
       },
       "Code":{
-         "S3Bucket": "767089282839-notebook-code",
-         "S3Key": "fraud-detection/notebooks/generator.py"  
-      }
+   "S3Bucket": { "Ref": "NotebookCodeS3Bucket" },
+   "S3Key": "fraud-detection/lambda/generator.zip"  
+}
    }
 },
        "DataGeneratorLambdaPermission":{
