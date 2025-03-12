@@ -220,6 +220,9 @@
                       "# Download notebook files",
                       {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/sagemaker_fraud_detection.ipynb ."},
                       {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/config.py src/package/"},
+                      {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/sagemaker_fraud_detection.py ."},
+                      {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/fraud_detection_processor.py ."},
+                      {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/generator.py src/package/"},
                       {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/utils.py src/package/"},
                       {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/on-start.sh ."},
                       "",
@@ -314,7 +317,20 @@
                   },
                   {
                     "Fn::Join": ["", ["arn:aws:s3:::", {"Ref": "LambdaCodeS3Bucket"}, "/*"]]
+                  },
+                  {
+                    "Fn::Join": [
+                      "/",
+                      [
+                        {
+                          "Fn::Sub": "arn:aws:s3:::${ssense-fraud-model-data}"
+                        },
+                        "*"
+                      ]
+                    ]
                   }
+                  
+
                 ]
               },
               {
@@ -629,8 +645,118 @@
           "FunctionName": { "Fn::GetAtt": ["LambdaFunction", "Arn"] },
           "StartingPosition": "LATEST"
         }
+      }    
+    },
+    "SageMakerFraudDetectionProcessingJob": {
+  "Type": "AWS::SageMaker::ProcessingJob",
+  "DependsOn": [
+    "DataGeneratorLambda",
+    "InvokeDataGeneratorLambda"
+  ],
+  "Properties": {
+    "ProcessingJobName": {
+      "Fn::Join": [
+        "-",
+        [
+          "FraudDetectionProcessing",
+          {
+            "Fn::Select": [
+              0,
+              {
+                "Fn::Split": [
+                  "-",
+                  {
+                    "Fn::Select": [
+                      2,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Ref": "AWS::StackId"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "ProcessingResources": {
+      "ClusterConfig": {
+        "InstanceCount": 1,
+        "InstanceType": "ml.m5.xlarge",
+        "VolumeSizeInGB": 30
       }
     },
+    "StoppingCondition": {
+      "MaxRuntimeInSeconds": 7200
+    },
+    "AppSpecification": {
+      "ImageUri": "763104351884.dkr.ecr.us-west-2.amazonaws.com/sagemaker-scikit-learn:0.23-1-cpu-py3",
+      "ContainerEntrypoint": [
+        "python3",
+        "fraud_detection_processor.py"
+      ],
+      "ContainerArguments": [
+        "--stack-name",
+        {"Ref": "AWS::StackName"},
+        "--s3-bucket",
+        {"Ref": "S3BucketName1"},
+        "--solution-prefix",
+        "ssense-fraud",
+        "--auto-deploy",
+        "True"
+      ]
+    },
+    "RoleArn": {"Fn::GetAtt": ["NotebookInstanceExecutionRole", "Arn"]},
+    "ProcessingInputs": [
+      {
+        "InputName": "code",
+        "S3Input": {
+          "S3Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "s3://",
+                {"Ref": "NotebookCodeS3Bucket"},
+                "/fraud-detection/notebooks/fraud_detection_processor.py"
+              ]
+            ]
+          },
+          "LocalPath": "/opt/ml/processing/input/code",
+          "S3DataType": "S3Prefix",
+          "S3InputMode": "File",
+          "S3DataDistributionType": "FullyReplicated"
+        }
+      }
+    ],
+    "ProcessingOutputConfig": {
+      "Outputs": [
+        {
+          "OutputName": "results",
+          "S3Output": {
+            "S3Uri": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {"Ref": "S3BucketName1"},
+                  "/processing-outputs/"
+                ]
+              ]
+            },
+            "LocalPath": "/opt/ml/processing/output",
+            "S3UploadMode": "EndOfJob"
+          }
+        }
+      ]
+    }
+  }
+},
     "Outputs": {
       "BasicNotebookInstanceId": {
         "Value": { "Ref": "BasicNotebookInstance" }
