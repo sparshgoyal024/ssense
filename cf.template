@@ -55,7 +55,6 @@
           "Description":"Percentage of fraudulent transactions",
           "Default":0.1
        }
-
     },
     "Metadata": {
       "AWS::CloudFormation::Interface": {
@@ -305,7 +304,7 @@
              }
           }
        }
-    }, 
+    , 
         "BasicNotebookInstanceLifecycleConfig": {
           "Type": "AWS::SageMaker::NotebookInstanceLifecycleConfig",
           "DependsOn": [
@@ -799,3 +798,4 @@
       }
     }
   
+}
