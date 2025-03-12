@@ -649,10 +649,6 @@
     },
     "SageMakerFraudDetectionProcessingJob": {
   "Type": "AWS::SageMaker::ProcessingJob",
-  "DependsOn": [
-    "DataGeneratorLambda",
-    "InvokeDataGeneratorLambda"
-  ],
   "Properties": {
     "ProcessingJobName": {
       "Fn::Join": [
