@@ -197,7 +197,6 @@ jobs:
 
 
   invoke-data-generator-lambda:
-    needs: deploy-cloudformation-cf2
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -213,7 +212,7 @@ jobs:
       - name: Get Lambda function name from CloudFormation outputs
         id: get-lambda-name
         run: |
-          LAMBDA_NAME=$(aws cloudformation describe-stacks --stack-name fraudssenseassessment-datagenerator \
+          LAMBDA_NAME=$(aws cloudformation describe-stacks --stack-name fraudssenseassessment \
             --query "Stacks[0].Outputs[?OutputKey=='DataGeneratorLambdaName'].OutputValue" \
             --output text)
           echo "LAMBDA_NAME=$LAMBDA_NAME" >> $GITHUB_ENV
