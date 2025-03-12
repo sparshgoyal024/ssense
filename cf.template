@@ -1,0 +1,672 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Ssense Fraud Detection System - Real-time Transaction Processing with ML",
+    "Parameters": {
+      "S3BucketName1": {
+        "Type": "String",
+        "Description": "Bucket for storing the ML model and training data."
+      },
+      "S3BucketName2": {
+        "Type": "String",
+        "Description": "Bucket for storing processed transactions."
+      },
+      "DynamoDBTableName": {
+        "Type": "String",
+        "Default": "ssense-fraud-transactions",
+        "Description": "DynamoDB table for storing transaction data."
+      },
+      "KinesisStreamName": {
+        "Type": "String",
+        "Default": "ssense-transaction-stream",
+        "Description": "Kinesis Data Stream for ingesting transaction data."
+      },
+      "NotebookCodeS3Bucket": {
+        "Type": "String",
+        "Default": "767089282839-notebook-code",
+        "Description": "S3 bucket containing notebook code."
+      },
+      "LambdaCodeS3Bucket": {
+        "Type": "String",
+        "Default": "767089282839-lambda-code",
+        "Description": "S3 bucket containing lambda code."
+      },
+      "SNSEmailAddress": {
+        "Type": "String",
+        "Description": "Email address to receive fraud alerts.",
+        "Default": "admin@example.com"
+      }
+    },
+    "Metadata": {
+      "AWS::CloudFormation::Interface": {
+        "ParameterGroups": [{
+            "Label": {
+              "default": "Amazon S3 Bucket Configuration"
+            },
+            "Parameters": ["S3BucketName1", "S3BucketName2", "NotebookCodeS3Bucket", "LambdaCodeS3Bucket"]
+          },
+          {
+            "Label": {
+              "default": "DynamoDB Configuration"
+            },
+            "Parameters": ["DynamoDBTableName"]
+          }
+        ],
+        "ParameterLabels": {
+          "S3BucketName1": {
+            "default": "Model and Data Bucket Name"
+          },
+          "S3BucketName2": {
+            "default": "Results Bucket Name"
+          },
+          "DynamoDBTableName": {
+            "default": "Transaction Table Name"
+          },
+          "KinesisStreamName": {
+            "default": "Transaction Stream Name"
+          },
+          "SNSEmailAddress": {
+            "default": "Fraud Alert Email"
+          }
+        }
+      }
+    },
+    "Resources": {
+      "S3Bucket1": {
+        "Type": "AWS::S3::Bucket",
+        "Properties": {
+          "BucketName": {
+            "Ref": "S3BucketName1"
+          },
+          "PublicAccessBlockConfiguration": {
+            "BlockPublicAcls": true,
+            "BlockPublicPolicy": true,
+            "IgnorePublicAcls": true,
+            "RestrictPublicBuckets": true
+          },
+          "BucketEncryption": {
+            "ServerSideEncryptionConfiguration": [{
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }]
+          }
+        }
+      },
+      "S3Bucket2": {
+        "Type": "AWS::S3::Bucket",
+        "Properties": {
+          "BucketName": {
+            "Ref": "S3BucketName2"
+          },
+          "PublicAccessBlockConfiguration": {
+            "BlockPublicAcls": true,
+            "BlockPublicPolicy": true,
+            "IgnorePublicAcls": true,
+            "RestrictPublicBuckets": true
+          },
+          "BucketEncryption": {
+            "ServerSideEncryptionConfiguration": [{
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }]
+          }
+        }
+      },
+      "DynamoDBTable": {
+        "Type": "AWS::DynamoDB::Table",
+        "Properties": {
+          "TableName": {
+            "Ref": "DynamoDBTableName"
+          },
+          "BillingMode": "PAY_PER_REQUEST",
+          "AttributeDefinitions": [
+            {
+              "AttributeName": "transaction_id",
+              "AttributeType": "S"
+            },
+            {
+              "AttributeName": "user_id",
+              "AttributeType": "S"
+            }
+          ],
+          "KeySchema": [
+            {
+              "AttributeName": "transaction_id",
+              "KeyType": "HASH"
+            }
+          ],
+          "GlobalSecondaryIndexes": [
+            {
+              "IndexName": "UserIdIndex",
+              "KeySchema": [
+                {
+                  "AttributeName": "user_id",
+                  "KeyType": "HASH"
+                }
+              ],
+              "Projection": {
+                "ProjectionType": "ALL"
+              }
+            }
+          ],
+          "TimeToLiveSpecification": {
+            "AttributeName": "ttl",
+            "Enabled": true
+          }
+        }
+      },
+      "SNSTopic": {
+        "Type": "AWS::SNS::Topic",
+        "Properties": {
+          "TopicName": "ssense-fraud-alerts",
+          "DisplayName": "Ssense Fraud Detection Alerts"
+        }
+      },
+      "SNSSubscription": {
+        "Type": "AWS::SNS::Subscription",
+        "Properties": {
+          "TopicArn": {
+            "Ref": "SNSTopic"
+          },
+          "Protocol": "email",
+          "Endpoint": {
+            "Ref": "SNSEmailAddress"
+          }
+        }
+      },
+      "BasicNotebookInstance": {
+        "Type": "AWS::SageMaker::NotebookInstance",
+        "Properties": {
+          "InstanceType": "ml.t3.large",
+          "NotebookInstanceName": "SsenseFraudDetection1",
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "NotebookInstanceExecutionRole",
+              "Arn"
+            ]
+          },
+          "LifecycleConfigName": {
+            "Fn::GetAtt": [
+              "BasicNotebookInstanceLifecycleConfig",
+              "NotebookInstanceLifecycleConfigName"
+            ]
+          }
+        }
+      }, 
+        "BasicNotebookInstanceLifecycleConfig": {
+          "Type": "AWS::SageMaker::NotebookInstanceLifecycleConfig",
+          "DependsOn": [
+            "S3Bucket1",
+            "S3Bucket2",
+            "DynamoDBTable",
+            "KinesisDataStream",
+            "SNSTopic"
+          ],
+          "Properties": {
+            "OnStart": [{
+              "Content": {
+                "Fn::Base64": {
+                  "Fn::Join": [
+                    "\n",
+                    [
+                      "#!/bin/bash",
+                      "set -e",
+                      "cd /home/ec2-user/SageMaker",
+                      "",
+                      "# Create necessary directories",
+                      "mkdir -p src/package",
+                      "",
+                      "# Download notebook files",
+                      {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/sagemaker_fraud_detection.ipynb ."},
+                      {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/generate_endpoint_traffic.py src/package/"},
+                      {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/generator.py src/package/"},
+                      {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/utils.py src/package/"},
+                      {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/on-start.sh ."},
+                      "",
+                      "# Create empty __init__.py",
+                      "touch src/package/__init__.py",
+                      "",
+                      "# Wait for the stack to fully complete before getting outputs",
+                      "sleep 30",
+                      "",
+                      "# Write stack outputs to a file with proper permissions",
+                      {"Fn::Sub": "aws cloudformation describe-stacks --stack-name ${AWS::StackName} --query 'Stacks[0].Outputs' --output json > stack_outputs.json"},
+                      "chown ec2-user:ec2-user stack_outputs.json",
+                      "chmod 644 stack_outputs.json",
+                      "",
+                      "# Fix permissions to make sure the notebook can read/write files",
+                      "chmod -R 755 /home/ec2-user/SageMaker/",
+                      "chmod -R 755 /home/ec2-user/SageMaker/src",
+                      "chown -R ec2-user:ec2-user /home/ec2-user/SageMaker/src",
+                      "",
+                      "# Run the start script",
+                      "sudo -u ec2-user bash ./on-start.sh"
+                    ]
+                  ]
+                }
+              }
+            }]
+          }
+        
+        }
+      ,
+      "NotebookInstanceExecutionRole": {
+        "Type": "AWS::IAM::Role",
+        "Properties": {
+          "AssumeRolePolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "sagemaker.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }]
+          }
+        }
+      },
+      "NotebookInstanceIAMPolicy": {
+        "Type": "AWS::IAM::Policy",
+        "Properties": {
+          "PolicyName": "sm-notebook-instance-policy",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetBucketLocation",
+                  "s3:ListBucket",
+                  "s3:GetObject",
+                  "s3:PutObject",
+                  "s3:DeleteObject",
+                  "lambda:UpdateFunctionCode",
+                  "s3:PutObjectAcl",
+                  "s3:GetObjectVersion"
+
+
+                ],
+                "Resource": [
+                  {
+                    "Fn::Join": ["", ["arn:aws:s3:::", {"Ref": "S3BucketName1"}]]
+                  },
+                  {
+                    "Fn::Join": ["", ["arn:aws:s3:::", {"Ref": "S3BucketName1"}, "/*"]]
+                  },
+                  {
+                    "Fn::Join": ["", ["arn:aws:s3:::", {"Ref": "S3BucketName2"}]]
+                  },
+                  {
+                    "Fn::Join": ["", ["arn:aws:s3:::", {"Ref": "S3BucketName2"}, "/*"]]
+                  },
+                  {
+                    "Fn::Join": ["", ["arn:aws:s3:::", {"Ref": "NotebookCodeS3Bucket"}]]
+                  },
+                  {
+                    "Fn::Join": ["", ["arn:aws:s3:::", {"Ref": "NotebookCodeS3Bucket"}, "/*"]]
+                  },
+                  {
+                    "Fn::Join": ["", ["arn:aws:s3:::", {"Ref": "LambdaCodeS3Bucket"}]]
+                  },
+                  {
+                    "Fn::Join": ["", ["arn:aws:s3:::", {"Ref": "LambdaCodeS3Bucket"}, "/*"]]
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "sagemaker:CreateTrainingJob",
+                  "sagemaker:DescribeTrainingJob",
+                  "sagemaker:CreateModel",
+                  "sagemaker:DescribeModel",
+                  "sagemaker:DeleteModel",
+                  "sagemaker:CreateEndpoint",
+                  "sagemaker:CreateEndpointConfig",
+                  "sagemaker:DescribeEndpoint",
+                  "sagemaker:DescribeEndpointConfig",
+                  "sagemaker:DeleteEndpoint",
+                  "sagemaker:DeleteEndpointConfig",
+                  "sagemaker:InvokeEndpoint",
+                  "sagemaker:ListHyperParameterTuningJobs",
+                  "sagemaker:ListTrainingJobsForHyperParameterTuningJob",
+                  "sagemaker:DescribeHyperParameterTuningJob",
+                  "sagemaker:CreateHyperParameterTuningJob",
+                  "sagemaker:DeleteHyperParameterTuningJob",
+                  "sagemaker:StopHyperParameterTuningJob"
+                ],
+                "Resource": [
+                  {
+                    "Fn::Join": ["", ["arn:aws:sagemaker:", {"Ref": "AWS::Region"}, ":", {"Ref": "AWS::AccountId"}, ":*"]]
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "cloudformation:DescribeStacks"
+                ],
+                "Resource": [
+                  {
+                    "Fn::Join": ["", ["arn:aws:cloudformation:", {"Ref": "AWS::Region"}, ":", {"Ref": "AWS::AccountId"}, ":stack/*"]]
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "dynamodb:PutItem",
+                  "dynamodb:GetItem",
+                  "dynamodb:UpdateItem",
+                  "dynamodb:DeleteItem",
+                  "dynamodb:Query",
+                  "dynamodb:Scan",
+                  "dynamodb:BatchWriteItem"
+                ],
+                "Resource": [
+                  {
+                    "Fn::GetAtt": ["DynamoDBTable", "Arn"]
+                  },
+                  {
+                    "Fn::Join": ["", [{"Fn::GetAtt": ["DynamoDBTable", "Arn"]}, "/index/*"]]
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "kinesis:PutRecord",
+                  "kinesis:PutRecords",
+                  "kinesis:GetRecords",
+                  "kinesis:GetShardIterator",
+                  "kinesis:DescribeStream",
+                  "kinesis:ListShards"
+                ],
+                "Resource": [
+                  {
+                    "Fn::GetAtt": ["KinesisDataStream", "Arn"]
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "sns:Publish"
+                ],
+                "Resource": [
+                  {
+                    "Ref": "SNSTopic"
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ecr:GetDownloadUrlForLayer",
+                  "ecr:BatchGetImage",
+                  "ecr:BatchCheckLayerAvailability"
+                ],
+                "Resource": [
+                  {
+                    "Fn::Join": ["", ["arn:aws:ecr:", {"Ref": "AWS::Region"}, ":", {"Ref": "AWS::AccountId"}, ":repository/*"]]
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ec2:CreateVpcEndpoint",
+                  "ec2:DescribeRouteTables"
+                ],
+                "Resource": "*"
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "cloudwatch:PutMetricData",
+                  "cloudwatch:GetMetricData",
+                  "cloudwatch:GetMetricStatistics",
+                  "cloudwatch:ListMetrics"
+                ],
+                "Resource": [
+                  {
+                    "Fn::Join": ["", ["arn:aws:cloudwatch:", {"Ref": "AWS::Region"}, ":", {"Ref": "AWS::AccountId"}, ":*"]]
+                  }
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "logs:CreateLogGroup",
+                  "logs:CreateLogStream",
+                  "logs:DescribeLogStreams",
+                  "logs:GetLogEvents",
+                  "logs:PutLogEvents"
+                ],
+                "Resource": {
+                  "Fn::Join": ["", ["arn:aws:logs:", {"Ref": "AWS::Region"}, ":", {"Ref": "AWS::AccountId"}, ":log-group:/aws/sagemaker/*"]]
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "iam:PassRole",
+                  "iam:GetRole"
+                ],
+                "Resource": [
+                  {
+                    "Fn::GetAtt": ["NotebookInstanceExecutionRole", "Arn"]
+                  }
+                ],
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "sagemaker.amazonaws.com"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "lambda:InvokeFunction"
+                ],
+                "Resource": [
+                  {
+                    "Fn::GetAtt": ["LambdaFunction", "Arn"]
+                  }
+                ]
+              }
+            ]
+          },
+          "Roles": [{
+            "Ref": "NotebookInstanceExecutionRole"
+          }]
+        }
+      },
+      "KinesisDataStream": {
+        "Type": "AWS::Kinesis::Stream",
+        "Properties": {
+          "Name": { "Ref": "KinesisStreamName" },
+          "RetentionPeriodHours": 24,
+          "ShardCount": 1
+        }
+      },
+      "LambdaFunction": {
+        "Type": "AWS::Lambda::Function",
+        "Properties": {
+          "Handler": "source.lambda.model-invocation.index.lambda_handler",
+          "FunctionName": "ssense-fraud-detection-processor",
+          "Role": {
+            "Fn::GetAtt": [
+              "LambdaExecutionRole",
+              "Arn"
+            ]
+          },
+          "Code": {
+            "S3Bucket": { "Ref": "LambdaCodeS3Bucket" },
+            "S3Key": "fraud-detection/lambda/fraud_detection.zip"
+          },
+          "Runtime": "python3.12",
+          "Environment": {
+            "Variables": {
+              "S3_BUCKET": { "Ref": "S3BucketName1" },
+              "DYNAMODB_TABLE": { "Ref": "DynamoDBTableName" },
+              "KINESIS_STREAM": { "Ref": "KinesisStreamName" },
+              "SOLUTION_PREFIX": "ssense-fraud",
+              "SNS_TOPIC_ARN": { "Ref": "SNSTopic" }
+            }
+          }
+        }
+      },
+      "LambdaExecutionRole": {
+        "Type": "AWS::IAM::Role",
+        "Properties": {
+          "AssumeRolePolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "lambda.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }]
+          },
+          "Path": "/",
+          "Policies": [{
+            "PolicyName": "root",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [{
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::Join": ["", ["arn:aws:logs:", {"Ref": "AWS::Region"}, ":", {"Ref": "AWS::AccountId"}, ":log-group:/aws/lambda/*"]]
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "sagemaker:InvokeEndpoint"
+                  ],
+                  "Resource": [
+                    "arn:aws:sagemaker:*:*:endpoint/*"
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:PutItem",
+                    "dynamodb:GetItem",
+                    "dynamodb:UpdateItem",
+                    "dynamodb:BatchWriteItem",
+                    "dynamodb:Query",
+                    "dynamodb:Scan"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "DynamoDBTable",
+                      "Arn"
+                    ]
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "kinesis:GetRecords",
+                    "kinesis:GetShardIterator",
+                    "kinesis:DescribeStream",
+                    "kinesis:ListShards",
+                    "kinesis:PutRecord",
+                    "kinesis:PutRecords"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "KinesisDataStream",
+                      "Arn"
+                    ]
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "sns:Publish"
+                  ],
+                  "Resource": {
+                    "Ref": "SNSTopic"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": {
+                    "Fn::Join": ["", ["arn:aws:s3:::", {"Ref": "S3BucketName1"}, "/*"]]
+                  }
+                }
+              ]
+            }
+          }]
+        }
+      },
+      "KinesisToLambdaMapping": {
+        "Type": "AWS::Lambda::EventSourceMapping",
+        "Properties": {
+          "BatchSize": 100,
+          "Enabled": true,
+          "EventSourceArn": { "Fn::GetAtt": ["KinesisDataStream", "Arn"] },
+          "FunctionName": { "Fn::GetAtt": ["LambdaFunction", "Arn"] },
+          "StartingPosition": "LATEST"
+        }
+      }
+    },
+    "Outputs": {
+      "BasicNotebookInstanceId": {
+        "Value": { "Ref": "BasicNotebookInstance" }
+      },
+      "DynamoDBTableName": {
+        "Description": "DynamoDB Table Name",
+        "Value": { "Ref": "DynamoDBTable" }
+      },
+      "DynamoDBTableArn": {
+        "Description": "DynamoDB Table ARN",
+        "Value": { "Fn::GetAtt": ["DynamoDBTable", "Arn"] }
+      },
+      "KinesisStreamName": {
+        "Description": "Kinesis Data Stream Name",
+        "Value": { "Ref": "KinesisDataStream" }
+      },
+      "KinesisStreamArn": {
+        "Description": "Kinesis Data Stream ARN",
+        "Value": { "Fn::GetAtt": ["KinesisDataStream", "Arn"] }
+      },
+      "NotebookRoleArn": {
+        "Description": "SageMaker Notebook Role ARN",
+        "Value": { "Fn::GetAtt": ["NotebookInstanceExecutionRole", "Arn"] }
+      },
+      "ModelDataBucket": {
+        "Description": "S3 Bucket for Model Data",
+        "Value": { "Ref": "S3BucketName1" }
+      },
+      "ResultsBucket": {
+        "Description": "S3 Bucket for Results",
+        "Value": { "Ref": "S3BucketName2" }
+      },
+      "SNSTopicArn": {
+        "Description": "SNS Topic ARN for Fraud Alerts",
+        "Value": { "Ref": "SNSTopic" }
+      }
+    }
+  }

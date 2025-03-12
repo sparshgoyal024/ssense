@@ -1,0 +1,243 @@
+name: Fraud Detection CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      s3_bucket_name1:
+        description: 'S3 Bucket for ML model and training data'
+        required: true
+        type: string
+      s3_bucket_name2:
+        description: 'S3 Bucket for processed transactions'
+        required: true
+        type: string
+      dynamodb_table_name:
+        description: 'DynamoDB table name'
+        required: true
+        default: 'ssense-fraud-transactions'
+        type: string
+      kinesis_stream_name:
+        description: 'Kinesis Stream name'
+        required: true
+        default: 'ssense-transaction-stream'
+        type: string
+      sns_email_address:
+        description: 'Email for fraud alerts'
+        required: true
+        default: 'admin@example.com'
+        type: string
+
+env:
+  AWS_REGION: us-west-2
+  LAMBDA_CODE_BUCKET: ${{ secrets.AWS_ACCOUNT_ID }}-lambda-code
+  NOTEBOOK_CODE_BUCKET: ${{ secrets.AWS_ACCOUNT_ID }}-notebook-code
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      
+      - name: Lint with flake8
+        run: |
+          # Stop the build if there are Python syntax errors or undefined names
+          flake8 lambda-package/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Exit-zero treats all errors as warnings
+          flake8 lambda-package/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      
+      - name: Validate CloudFormation template
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - run: |
+          aws cloudformation validate-template --template-body file://cf.template
+
+  build-lambda:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f lambda-package/requirements.txt ]; then pip install -r lambda-package/requirements.txt; fi
+      
+      - name: Build Lambda package
+        run: |
+          mkdir -p build
+          cd lambda-package
+          zip -r ../build/fraud_detection.zip source/lambda/model-invocation/index.py
+          cd ..
+      
+      - name: Upload Lambda artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: lambda-package
+          path: build/fraud_detection.zip
+
+  build-notebook:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Package notebook code
+        run: |
+          mkdir -p build
+          cp -r notebook-package/source/notebooks build/
+          cp -r notebook-package/src build/
+          cp notebook-package/on-start.sh build/
+      
+      - name: Upload notebook artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: notebook-package
+          path: build/
+
+  deploy-to-s3:
+    needs: [build-lambda, build-notebook]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Download lambda package
+        uses: actions/download-artifact@v3
+        with:
+          name: lambda-package
+          path: ./lambda-dist
+      
+      - name: Download notebook package
+        uses: actions/download-artifact@v3
+        with:
+          name: notebook-package
+          path: ./notebook-dist
+      
+      - name: Create S3 buckets if they don't exist
+        run: |
+          # Create Lambda code bucket if it doesn't exist
+          if ! aws s3 ls "s3://${LAMBDA_CODE_BUCKET}" 2>&1 > /dev/null; then
+            aws s3 mb "s3://${LAMBDA_CODE_BUCKET}" --region ${AWS_REGION}
+            aws s3api put-bucket-encryption --bucket ${LAMBDA_CODE_BUCKET} --server-side-encryption-configuration '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}'
+          fi
+          
+          # Create Notebook code bucket if it doesn't exist
+          if ! aws s3 ls "s3://${NOTEBOOK_CODE_BUCKET}" 2>&1 > /dev/null; then
+            aws s3 mb "s3://${NOTEBOOK_CODE_BUCKET}" --region ${AWS_REGION}
+            aws s3api put-bucket-encryption --bucket ${NOTEBOOK_CODE_BUCKET} --server-side-encryption-configuration '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}'
+          fi
+      
+      - name: Upload Lambda code to S3
+        run: |
+          aws s3 cp ./lambda-dist/fraud_detection.zip s3://${LAMBDA_CODE_BUCKET}/fraud-detection/lambda/fraud_detection.zip
+      
+      - name: Upload Notebook code to S3
+        run: |
+          aws s3 cp ./notebook-dist/notebooks/sagemaker_fraud_detection.ipynb s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/sagemaker_fraud_detection.ipynb
+          aws s3 cp ./notebook-dist/on-start.sh s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/on-start.sh
+          
+          # Copy the utility files
+          if [ -d "./notebook-dist/src/package" ]; then
+            aws s3 cp ./notebook-dist/src/package/generator.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/generator.py
+            aws s3 cp ./notebook-dist/src/package/utils.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/utils.py
+            if [ -f "./notebook-dist/src/package/generate_endpoint_traffic.py" ]; then
+              aws s3 cp ./notebook-dist/src/package/generate_endpoint_traffic.py s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/generate_endpoint_traffic.py
+            fi
+          fi
+  
+  deploy-cloudformation:
+    needs: deploy-to-s3
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Deploy CloudFormation stack
+        run: |
+          aws cloudformation deploy \
+            --template-file cf.template \
+            --stack-name fraudssenseassessment \
+            --parameter-overrides \
+              S3BucketName1=${{ github.event.inputs.s3_bucket_name1 }} \
+              S3BucketName2=${{ github.event.inputs.s3_bucket_name2 }} \
+              DynamoDBTableName=${{ github.event.inputs.dynamodb_table_name }} \
+              KinesisStreamName=${{ github.event.inputs.kinesis_stream_name }} \
+              NotebookCodeS3Bucket=${NOTEBOOK_CODE_BUCKET} \
+              LambdaCodeS3Bucket=${LAMBDA_CODE_BUCKET} \
+              SNSEmailAddress=${{ github.event.inputs.sns_email_address }} \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset
+      
+      - name: Get CloudFormation outputs
+        id: cfn-outputs
+        run: |
+          outputs=$(aws cloudformation describe-stacks --stack-name fraudssenseassessment --query 'Stacks[0].Outputs' --output json)
+          echo "cfn_outputs=$(echo $outputs | jq -c)" >> $GITHUB_OUTPUT
+          echo "Deployed stack with outputs: $outputs"
+      
+      - name: Create deployment summary
+        run: |
+          echo "### Fraud Detection Pipeline Deployment Summary" > deployment_summary.md
+          echo "- Stack Name: fraudssenseassessment" >> deployment_summary.md
+          echo "- Region: ${{ env.AWS_REGION }}" >> deployment_summary.md
+          echo "- Deployment Time: $(date)" >> deployment_summary.md
+          echo "" >> deployment_summary.md
+          
+          echo "#### Stack Outputs" >> deployment_summary.md
+          echo '```json' >> deployment_summary.md
+          echo '${{ steps.cfn-outputs.outputs.cfn_outputs }}' >> deployment_summary.md
+          echo '```' >> deployment_summary.md
+          
+          echo "#### Resources Created" >> deployment_summary.md
+          echo "- SageMaker Notebook Instance for model training" >> deployment_summary.md
+          echo "- Lambda function for transaction processing" >> deployment_summary.md
+          echo "- Kinesis Data Stream for data ingestion" >> deployment_summary.md
+          echo "- DynamoDB table for transaction storage" >> deployment_summary.md
+          echo "- SNS Topic for fraud alerts" >> deployment_summary.md
+          echo "- S3 Buckets for model storage and results" >> deployment_summary.md
+          
+          cat deployment_summary.md
+      
+      - name: Upload deployment summary
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-summary
+          path: deployment_summary.md
