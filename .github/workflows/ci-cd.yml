@@ -75,7 +75,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       
       - run: |
-          aws cloudformation validate-template --template-body file://cf3.json
+          aws cloudformation validate-template --template-body file://cf.template
 
   copy-files-to-s3:
     needs: validate
@@ -130,6 +130,7 @@ jobs:
             aws s3 cp notebook-package/requirements.txt s3://${NOTEBOOK_CODE_BUCKET}/fraud-detection/notebooks/requirements.txt
           fi
 
+  
   deploy-cloudformation:
     needs: copy-files-to-s3
     runs-on: ubuntu-latest
@@ -147,17 +148,13 @@ jobs:
       - name: Deploy CloudFormation stack
         run: |
           aws cloudformation deploy \
-            --template-file cf3.json \
+            --template-file cf.template \
             --stack-name fraudssenseassessment \
             --parameter-overrides \
               S3BucketName1=${{ github.event.inputs.s3_bucket_name1 || env.DEFAULT_S3_BUCKET_NAME1 }} \
               S3BucketName2=${{ github.event.inputs.s3_bucket_name2 || env.DEFAULT_S3_BUCKET_NAME2 }} \
               DynamoDBTableName=${{ github.event.inputs.dynamodb_table_name || env.DEFAULT_DYNAMODB_TABLE_NAME }} \
               KinesisStreamName=${{ github.event.inputs.kinesis_stream_name || env.DEFAULT_KINESIS_STREAM_NAME }} \
-              ModelDataBucketName=${{ github.event.inputs.s3_bucket_name1 || env.DEFAULT_S3_BUCKET_NAME1 }} \
-              DataPrefix=historical-data \
-              NumTransactions=50000 \
-              FraudRatio=0.1 \
               NotebookCodeS3Bucket=${NOTEBOOK_CODE_BUCKET} \
               LambdaCodeS3Bucket=${LAMBDA_CODE_BUCKET} \
               SNSEmailAddress=${{ github.event.inputs.sns_email_address || env.DEFAULT_SNS_EMAIL_ADDRESS }} \
@@ -172,31 +169,36 @@ jobs:
           echo "Deployed stack with outputs: $outputs"
 
 
-  # deploy-cloudformation-cf2:
-  #   needs: deploy-cloudformation
-  #   runs-on: ubuntu-latest
-  #   environment: production
-  #   steps:
-  #     - uses: actions/checkout@v3
+  deploy-cloudformation-cf2:
+    needs: deploy-cloudformation
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v3
       
-  #     - name: Configure AWS credentials
-  #       uses: aws-actions/configure-aws-credentials@v2
-  #       with:
-  #         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  #         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  #         aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
       
-  #     - name: Deploy CloudFormation cf2 stack
-  #       run: |
-  #         aws cloudformation deploy \
-  #           --template-file cf2.template \
-  #           --stack-name fraudssenseassessment-datagenerator \
-  #           --parameter-overrides \
-  #              \
-              
+      - name: Deploy CloudFormation cf2 stack
+        run: |
+          aws cloudformation deploy \
+            --template-file cf2.template \
+            --stack-name fraudssenseassessment-datagenerator \
+            --parameter-overrides \
+              ModelDataBucketName=${{ github.event.inputs.s3_bucket_name1 || env.DEFAULT_S3_BUCKET_NAME1 }} \
+              DataPrefix=historical-data \
+              NumTransactions=50000 \
+              FraudRatio=0.1 \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset
 
 
   invoke-data-generator-lambda:
+    needs: deploy-cloudformation-cf2
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -212,7 +214,7 @@ jobs:
       - name: Get Lambda function name from CloudFormation outputs
         id: get-lambda-name
         run: |
-          LAMBDA_NAME=$(aws cloudformation describe-stacks --stack-name fraudssenseassessment \
+          LAMBDA_NAME=$(aws cloudformation describe-stacks --stack-name fraudssenseassessment-datagenerator \
             --query "Stacks[0].Outputs[?OutputKey=='DataGeneratorLambdaName'].OutputValue" \
             --output text)
           echo "LAMBDA_NAME=$LAMBDA_NAME" >> $GITHUB_ENV

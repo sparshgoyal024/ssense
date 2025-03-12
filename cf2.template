@@ -5,7 +5,7 @@
        "ModelDataBucketName":{
           "Type":"String",
           "Description":"Bucket for storing the ML model and historical data",
-          "Default":"fraudassessmentssensemodel1"
+          "Default":"fraudassessmentssensemodel"
        },
        "DataPrefix":{
           "Type":"String",
