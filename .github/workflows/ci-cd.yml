@@ -34,7 +34,7 @@ on:
         type: string
 
 env:
-  AWS_REGION: us-west-2
+  AWS_REGION: us-east-1
   LAMBDA_CODE_BUCKET: ${{ secrets.AWS_ACCOUNT_ID }}-lambda-code
   NOTEBOOK_CODE_BUCKET: ${{ secrets.AWS_ACCOUNT_ID }}-notebook-code
   DEFAULT_S3_BUCKET_NAME1: 'fraudassessmentssensemodel'

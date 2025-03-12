@@ -1,155 +1,189 @@
 {
-    "AWSTemplateFormatVersion": "2010-09-09",
-    "Description": "Data Generator for Ssense Fraud Detection System",
-    
-    "Parameters": {
-      "ModelDataBucketName": {
-        "Type": "String",
-        "Description": "Bucket for storing the ML model and historical data",
-        "Default": "ssense-fraud-model-data"
-      },
-      "DataPrefix": {
-        "Type": "String",
-        "Description": "Prefix for historical data in S3 bucket",
-        "Default": "historical-data"
-      },
-      "NumTransactions": {
-        "Type": "Number",
-        "Description": "Number of historical transactions to generate",
-        "Default": 50000
-      },
-      "FraudRatio": {
-        "Type": "Number",
-        "Description": "Percentage of fraudulent transactions",
-        "Default": 0.1
-      }
+    "AWSTemplateFormatVersion":"2010-09-09",
+    "Description":"Data Generator for Ssense Fraud Detection System",
+    "Parameters":{
+       "ModelDataBucketName":{
+          "Type":"String",
+          "Description":"Bucket for storing the ML model and historical data",
+          "Default":"ssense-fraud-model-data"
+       },
+       "DataPrefix":{
+          "Type":"String",
+          "Description":"Prefix for historical data in S3 bucket",
+          "Default":"historical-data"
+       },
+       "NumTransactions":{
+          "Type":"Number",
+          "Description":"Number of historical transactions to generate",
+          "Default":50000
+       },
+       "FraudRatio":{
+          "Type":"Number",
+          "Description":"Percentage of fraudulent transactions",
+          "Default":0.1
+       }
     },
-    
-    "Resources": {
-      "ModelDataBucket": {
-        "Type": "AWS::S3::Bucket",
-        "Properties": {
-          "BucketName": {"Ref": "ModelDataBucketName"},
-          "PublicAccessBlockConfiguration": {
-            "BlockPublicAcls": true,
-            "BlockPublicPolicy": true,
-            "IgnorePublicAcls": true,
-            "RestrictPublicBuckets": true
-          },
-          "BucketEncryption": {
-            "ServerSideEncryptionConfiguration": [
-              {
-                "ServerSideEncryptionByDefault": {
-                  "SSEAlgorithm": "AES256"
-                }
-              }
-            ]
-          }
-        }
-      },
-      
-      "DataGeneratorLambdaRole": {
-        "Type": "AWS::IAM::Role",
-        "Properties": {
-          "AssumeRolePolicyDocument": {
-            "Version": "2012-10-17",
-            "Statement": [
-              {
-                "Effect": "Allow",
-                "Principal": {
-                  "Service": "lambda.amazonaws.com"
-                },
-                "Action": "sts:AssumeRole"
-              }
-            ]
-          },
-          "ManagedPolicyArns": [
-            "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-          ],
-          "Policies": [
-            {
-              "PolicyName": "S3Access",
-              "PolicyDocument": {
-                "Version": "2012-10-17",
-                "Statement": [
-                  {
-                    "Effect": "Allow",
-                    "Action": [
-                      "s3:CreateBucket",
-                      "s3:ListBucket",
-                      "s3:GetObject",
-                      "s3:PutObject",
-                      "s3:HeadBucket",
-                      "s3:HeadObject"
-                    ],
-                    "Resource": [
-                      {"Fn::Sub": "arn:aws:s3:::${ModelDataBucketName}"},
-                      {"Fn::Sub": "arn:aws:s3:::${ModelDataBucketName}/*"}
-                    ]
-                  }
+    "Resources":{
+       "ModelDataBucket":{
+          "Type":"AWS::S3::Bucket",
+          "Properties":{
+             "BucketName":{
+                "Ref":"ModelDataBucketName"
+             },
+             "PublicAccessBlockConfiguration":{
+                "BlockPublicAcls":true,
+                "BlockPublicPolicy":true,
+                "IgnorePublicAcls":true,
+                "RestrictPublicBuckets":true
+             },
+             "BucketEncryption":{
+                "ServerSideEncryptionConfiguration":[
+                   {
+                      "ServerSideEncryptionByDefault":{
+                         "SSEAlgorithm":"AES256"
+                      }
+                   }
                 ]
-              }
-            }
-          ]
-        }
-      },
-      
-      "DataGeneratorLambda": {
-        "Type": "AWS::Lambda::Function",
-        "Properties": {
-          "FunctionName": "ssense-fraud-data-generator",
-          "Handler": "index.lambda_handler",
-          "Role": {"Fn::GetAtt": ["DataGeneratorLambdaRole", "Arn"]},
-          "Runtime": "python3.9",
-          "Timeout": 300,
-          "MemorySize": 512,
-          "Environment": {
-            "Variables": {
-              "MODEL_DATA_S3_BUCKET": {"Ref": "ModelDataBucketName"},
-              "DATA_PREFIX": {"Ref": "DataPrefix"},
-              "NUM_TRANSACTIONS": {"Ref": "NumTransactions"},
-              "FRAUD_RATIO": {"Ref": "FraudRatio"}
-            }
-          },
-          "Code": {
-            "ZipFile": "import json\nimport random\nimport datetime\nimport uuid\nimport boto3\nimport logging\nimport io\nimport os\nimport numpy as np\nfrom datetime import timedelta\n\n# Configure logging\nlogger = logging.getLogger()\nlogger.setLevel(logging.INFO)\n\n# Get environment variables\nS3_BUCKET = os.environ.get('MODEL_DATA_S3_BUCKET', 'ssense-fraud-model-data')\nDATA_PREFIX = os.environ.get('DATA_PREFIX', 'historical-data')\nNUM_TRANSACTIONS = int(os.environ.get('NUM_TRANSACTIONS', 50000))\nFRAUD_RATIO = float(os.environ.get('FRAUD_RATIO', 0.1))  # 10% fraud\n\n# AWS clients\ns3_client = boto3.client('s3')\n\ndef check_data_exists():\n    \"\"\"Check if historical data already exists in S3 bucket\"\"\"\n    try:\n        # Check if the bucket exists\n        s3_client.head_bucket(Bucket=S3_BUCKET)\n        logger.info(f\"Bucket {S3_BUCKET} exists\")\n        \n        # Check if historical data file exists\n        try:\n            s3_client.head_object(Bucket=S3_BUCKET, Key=f\"{DATA_PREFIX}/transactions.json\")\n            logger.info(f\"Historical data already exists at s3://{S3_BUCKET}/{DATA_PREFIX}/transactions.json\")\n            return True\n        except Exception:\n            logger.info(f\"Historical data doesn't exist in bucket {S3_BUCKET}\")\n            return False\n    except Exception:\n        logger.info(f\"Bucket {S3_BUCKET} doesn't exist\")\n        # Create the bucket if it doesn't exist\n        try:\n            s3_client.create_bucket(\n                Bucket=S3_BUCKET,\n                CreateBucketConfiguration={'LocationConstraint': boto3.session.Session().region_name}\n            )\n            logger.info(f\"Created bucket {S3_BUCKET}\")\n        except Exception as e:\n            logger.error(f\"Error creating bucket {S3_BUCKET}: {str(e)}\")\n            raise\n        return False\n\ndef generate_timestamp(days_back=365):\n    \"\"\"Generate a random timestamp within the specified days back from now\"\"\"\n    end_date = datetime.datetime.now()\n    start_date = end_date - datetime.timedelta(days=days_back)\n    time_delta = end_date - start_date\n    random_seconds = random.randrange(int(time_delta.total_seconds()))\n    return start_date + datetime.timedelta(seconds=random_seconds)\n\ndef generate_transaction(is_fraud=False):\n    \"\"\"Generate a realistic transaction based on the schema\"\"\"\n    # Generate a transaction ID\n    transaction_id = f\"T{uuid.uuid4().hex[:8].upper()}\"\n    \n    # Generate a user ID\n    user_id = f\"U{random.randint(10000, 99999)}\"\n    \n    # Generate timestamp\n    timestamp = generate_timestamp()\n    timestamp_str = timestamp.strftime('%Y-%m-%dT%H:%M:%SZ')\n    \n    # Generate transaction amount\n    if is_fraud:\n        # Fraudulent transactions tend to be larger or very small (testing with small amounts)\n        amount_pattern = random.random()\n        if amount_pattern < 0.7:  # 70% chance of high amount\n            amount = round(random.uniform(500, 3000), 2)\n        else:  # 30% chance of suspicious micro-transaction\n            amount = round(random.uniform(0.5, 10), 2)\n    else:\n        # Normal transactions follow a log-normal distribution\n        amount = round(np.random.lognormal(mean=4.5, sigma=1.0), 2)\n        # Clamp to reasonable range\n        amount = min(max(amount, 5.0), 500.0)\n    \n    # Generate device type with realistic distribution\n    device_options = ['mobile', 'desktop', 'tablet']\n    if is_fraud:\n        # Fraudulent transactions more likely from mobile\n        device_weights = [0.65, 0.25, 0.1]\n    else:\n        # Normal distribution favors desktop slightly\n        device_weights = [0.4, 0.5, 0.1]\n    device_type = random.choices(device_options, weights=device_weights)[0]\n    \n    # Generate location\n    locations = [\n        'California, USA', 'New York, USA', 'Texas, USA', 'Florida, USA', \n        'Illinois, USA', 'London, UK', 'Paris, France', 'Berlin, Germany', \n        'Tokyo, Japan', 'Sydney, Australia'\n    ]\n    \n    if is_fraud:\n        # Fraudulent transactions more likely from unusual locations\n        location_weights = [0.05, 0.05, 0.05, 0.05, 0.05, 0.15, 0.2, 0.15, 0.15, 0.1]\n    else:\n        # Normal transactions more likely from US\n        location_weights = [0.25, 0.2, 0.15, 0.1, 0.1, 0.05, 0.05, 0.05, 0.03, 0.02]\n    \n    location = random.choices(locations, weights=location_weights)[0]\n    \n    # Generate VPN usage\n    if is_fraud:\n        # Fraudulent transactions more likely to use VPN\n        is_vpn = random.choices([True, False], weights=[0.7, 0.3])[0]\n    else:\n        # Normal transactions less likely to use VPN\n        is_vpn = random.choices([True, False], weights=[0.08, 0.92])[0]\n    \n    # Generate card type\n    card_options = ['credit', 'debit', 'gift']\n    if is_fraud:\n        # Fraudulent transactions more likely with credit cards or gift cards\n        card_weights = [0.5, 0.2, 0.3]\n    else:\n        # Normal distribution favors debit and credit\n        card_weights = [0.45, 0.5, 0.05]\n    \n    card_type = random.choices(card_options, weights=card_weights)[0]\n    \n    # Generate transaction status\n    status_options = ['approved', 'pending', 'declined']\n    if is_fraud and random.random() < 0.4:\n        # Some fraudulent transactions might be declined or pending\n        status = random.choices(status_options, weights=[0.6, 0.15, 0.25])[0]\n    else:\n        # Most transactions are approved\n        status = random.choices(status_options, weights=[0.95, 0.03, 0.02])[0]\n    \n    # Create transaction object\n    transaction = {\n        'transaction_id': transaction_id,\n        'user_id': user_id,\n        'timestamp': timestamp_str,\n        'amount': amount,\n        'device_type': device_type,\n        'location': location,\n        'is_vpn': is_vpn,\n        'card_type': card_type,\n        'status': status,\n        # Add a label for training purposes (not in the original schema but useful)\n        'is_fraud': is_fraud\n    }\n    \n    return transaction\n\ndef generate_historical_data(num_transactions=50000, fraud_ratio=0.1):\n    \"\"\"Generate historical transaction data with realistic fraud patterns\"\"\"\n    logger.info(f\"Generating {num_transactions} transactions with {fraud_ratio*100}% fraud ratio\")\n    \n    transactions = []\n    num_fraud = int(num_transactions * fraud_ratio)\n    num_legitimate = num_transactions - num_fraud\n    \n    # Generate legitimate transactions\n    for _ in range(num_legitimate):\n        transactions.append(generate_transaction(is_fraud=False))\n    \n    # Generate fraudulent transactions\n    for _ in range(num_fraud):\n        transactions.append(generate_transaction(is_fraud=True))\n    \n    # Shuffle the transactions to mix fraud and legitimate\n    random.shuffle(transactions)\n    \n    # Time-sort transactions to simulate a realistic timeline\n    transactions.sort(key=lambda x: x['timestamp'])\n    \n    # Create consistent user behavior patterns\n    users = {}\n    for transaction in transactions:\n        user_id = transaction['user_id']\n        if user_id not in users:\n            users[user_id] = {\n                'preferred_device': random.choice(['mobile', 'desktop', 'tablet']),\n                'preferred_location': random.choice(['California, USA', 'New York, USA', 'Texas, USA', 'Florida, USA', 'Illinois, USA']),\n                'preferred_card': random.choice(['credit', 'debit']),\n                'transaction_count': 0,\n                'avg_amount': 0\n            }\n        \n        users[user_id]['transaction_count'] += 1\n        users[user_id]['avg_amount'] = ((users[user_id]['avg_amount'] * (users[user_id]['transaction_count'] - 1)) + \n                                     transaction['amount']) / users[user_id]['transaction_count']\n    \n    # Add user behavior consistency to non-fraud transactions (with some randomness)\n    for i, transaction in enumerate(transactions):\n        if not transaction['is_fraud'] and random.random() < 0.85:  # 85% of legitimate transactions follow patterns\n            user_id = transaction['user_id']\n            user = users[user_id]\n            \n            # Apply user preferences with some variability\n            if random.random() < 0.9:  # 90% chance to use preferred device\n                transaction['device_type'] = user['preferred_device']\n            \n            if random.random() < 0.85:  # 85% chance to use preferred location\n                transaction['location'] = user['preferred_location']\n            \n            if random.random() < 0.95:  # 95% chance to use preferred card\n                transaction['card_type'] = user['preferred_card']\n            \n            # Adjust amount to be closer to user's average (with variation)\n            if random.random() < 0.7:  # 70% of transactions are near average\n                avg = user['avg_amount']\n                variation = avg * 0.3  # 30% variation\n                transaction['amount'] = round(random.uniform(avg - variation, avg + variation), 2)\n                transaction['amount'] = max(transaction['amount'], 1.0)  # Ensure positive amount\n            \n            transactions[i] = transaction\n    \n    return transactions\n\ndef upload_to_s3(transactions, bucket, key):\n    \"\"\"Upload transactions to S3 bucket\"\"\"\n    try:\n        # Convert to JSON\n        transactions_json = json.dumps(transactions, indent=2)\n        \n        # Upload to S3\n        s3_client.put_object(\n            Bucket=bucket,\n            Key=key,\n            Body=transactions_json\n        )\n        \n        logger.info(f\"Uploaded {len(transactions)} transactions to s3://{bucket}/{key}\")\n        return True\n    except Exception as e:\n        logger.error(f\"Error uploading data to S3: {str(e)}\")\n        return False\n\ndef lambda_handler(event, context):\n    \"\"\"Lambda handler for generating historical transaction data\"\"\"\n    try:\n        # Check if data already exists\n        if check_data_exists():\n            return {\n                'statusCode': 200,\n                'body': json.dumps('Historical data already exists. No action taken.')\n            }\n        \n        # Generate historical data\n        transactions = generate_historical_data(NUM_TRANSACTIONS, FRAUD_RATIO)\n        \n        # Upload to S3\n        upload_success = upload_to_s3(\n            transactions, \n            S3_BUCKET, \n            f\"{DATA_PREFIX}/transactions.json\"\n        )\n        \n        if upload_success:\n            return {\n                'statusCode': 200,\n                'body': json.dumps(f'Successfully generated and uploaded {NUM_TRANSACTIONS} transactions')\n            }\n        else:\n            return {\n                'statusCode': 500,\n                'body': json.dumps('Failed to upload transactions to S3')\n            }\n            \n    except Exception as e:\n        logger.error(f\"Error in lambda_handler: {str(e)}\")\n        return {\n            'statusCode': 500,\n            'body': json.dumps(f'Error: {str(e)}')\n        }\n\n# For local testing\nif __name__ == \"__main__\":\n    lambda_handler({}, None)"
+             }
           }
-        }
-      },
-      
-      "DataGeneratorLambdaPermission": {
-        "Type": "AWS::Lambda::Permission",
-        "Properties": {
-          "Action": "lambda:InvokeFunction",
-          "FunctionName": {"Fn::GetAtt": ["DataGeneratorLambda", "Arn"]},
-          "Principal": "cloudformation.amazonaws.com",
-          "SourceAccount": {"Ref": "AWS::AccountId"}
-        }
-      },
-      
-      "InvokeDataGeneratorLambda": {
-        "Type": "Custom::InvokeDataGeneratorLambda",
-        "DependsOn": "DataGeneratorLambda",
-        "Properties": {
-          "ServiceToken": {"Fn::GetAtt": ["DataGeneratorLambda", "Arn"]},
-          "Region": {"Ref": "AWS::Region"},
-          "Timestamp": {"Ref": "AWS::AccountId"}
-        }
-      }
+       },
+       "DataGeneratorLambdaRole":{
+          "Type":"AWS::IAM::Role",
+          "Properties":{
+             "AssumeRolePolicyDocument":{
+                "Version":"2012-10-17",
+                "Statement":[
+                   {
+                      "Effect":"Allow",
+                      "Principal":{
+                         "Service":"lambda.amazonaws.com"
+                      },
+                      "Action":"sts:AssumeRole"
+                   }
+                ]
+             },
+             "ManagedPolicyArns":[
+                "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+             ],
+             "Policies":[
+                {
+                   "PolicyName":"S3Access",
+                   "PolicyDocument":{
+                      "Version":"2012-10-17",
+                      "Statement":[
+                         {
+                            "Effect":"Allow",
+                            "Action":[
+                               "s3:CreateBucket",
+                               "s3:ListBucket",
+                               "s3:GetObject",
+                               "s3:PutObject",
+                               "s3:HeadBucket",
+                               "s3:HeadObject"
+                            ],
+                            "Resource":[
+                               {
+                                  "Fn::Sub":"arn:aws:s3:::${ModelDataBucketName}"
+                               },
+                               {
+                                  "Fn::Sub":"arn:aws:s3:::${ModelDataBucketName}/*"
+                               }
+                            ]
+                         }
+                      ]
+                   }
+                }
+             ]
+          }
+       },
+       "DataGeneratorLambda":{
+          "Type":"AWS::Lambda::Function",
+          "Properties":{
+             "FunctionName":"ssense-fraud-data-generator",
+             "Handler":"index.lambda_handler",
+             "Role":{
+                "Fn::GetAtt":[
+                   "DataGeneratorLambdaRole",
+                   "Arn"
+                ]
+             },
+             "Runtime":"python3.9",
+             "Timeout":300,
+             "MemorySize":512,
+             "Environment":{
+                "Variables":{
+                   "MODEL_DATA_S3_BUCKET":{
+                      "Ref":"ModelDataBucketName"
+                   },
+                   "DATA_PREFIX":{
+                      "Ref":"DataPrefix"
+                   },
+                   "NUM_TRANSACTIONS":{
+                      "Ref":"NumTransactions"
+                   },
+                   "FRAUD_RATIO":{
+                      "Ref":"FraudRatio"
+                   }
+                }
+             },
+             "Code":{
+                "ZipFile":"import json\nimport random\nimport datetime\nimport uuid\nimport boto3\nimport logging\nimport io\nimport os\nimport numpy as np\nfrom datetime import timedelta\n\n# Configure logging\nlogger = logging.getLogger()\nlogger.setLevel(logging.INFO)\n\n# Get environment variables\nS3_BUCKET = os.environ.get('MODEL_DATA_S3_BUCKET', 'ssense-fraud-model-data')\nDATA_PREFIX = os.environ.get('DATA_PREFIX', 'historical-data')\nNUM_TRANSACTIONS = int(os.environ.get('NUM_TRANSACTIONS', 50000))\nFRAUD_RATIO = float(os.environ.get('FRAUD_RATIO', 0.1))  # 10% fraud\n\n# AWS clients\ns3_client = boto3.client('s3')\n\ndef check_data_exists():\n    \"\"\"Check if historical data already exists in S3 bucket\"\"\"\n    try:\n        # Check if the bucket exists\n        s3_client.head_bucket(Bucket=S3_BUCKET)\n        logger.info(f\"Bucket {S3_BUCKET} exists\")\n        \n        # Check if historical data file exists\n        try:\n            s3_client.head_object(Bucket=S3_BUCKET, Key=f\"{DATA_PREFIX}/transactions.json\")\n            logger.info(f\"Historical data already exists at s3://{S3_BUCKET}/{DATA_PREFIX}/transactions.json\")\n            return True\n        except Exception:\n            logger.info(f\"Historical data doesn't exist in bucket {S3_BUCKET}\")\n            return False\n    except Exception:\n        logger.info(f\"Bucket {S3_BUCKET} doesn't exist\")\n        # Create the bucket if it doesn't exist\n        try:\n            s3_client.create_bucket(\n                Bucket=S3_BUCKET,\n                CreateBucketConfiguration={'LocationConstraint': boto3.session.Session().region_name}\n            )\n            logger.info(f\"Created bucket {S3_BUCKET}\")\n        except Exception as e:\n            logger.error(f\"Error creating bucket {S3_BUCKET}: {str(e)}\")\n            raise\n        return False\n\ndef generate_timestamp(days_back=365):\n    \"\"\"Generate a random timestamp within the specified days back from now\"\"\"\n    end_date = datetime.datetime.now()\n    start_date = end_date - datetime.timedelta(days=days_back)\n    time_delta = end_date - start_date\n    random_seconds = random.randrange(int(time_delta.total_seconds()))\n    return start_date + datetime.timedelta(seconds=random_seconds)\n\ndef generate_transaction(is_fraud=False):\n    \"\"\"Generate a realistic transaction based on the schema\"\"\"\n    # Generate a transaction ID\n    transaction_id = f\"T{uuid.uuid4().hex[:8].upper()}\"\n    \n    # Generate a user ID\n    user_id = f\"U{random.randint(10000, 99999)}\"\n    \n    # Generate timestamp\n    timestamp = generate_timestamp()\n    timestamp_str = timestamp.strftime('%Y-%m-%dT%H:%M:%SZ')\n    \n    # Generate transaction amount\n    if is_fraud:\n        # Fraudulent transactions tend to be larger or very small (testing with small amounts)\n        amount_pattern = random.random()\n        if amount_pattern < 0.7:  # 70% chance of high amount\n            amount = round(random.uniform(500, 3000), 2)\n        else:  # 30% chance of suspicious micro-transaction\n            amount = round(random.uniform(0.5, 10), 2)\n    else:\n        # Normal transactions follow a log-normal distribution\n        amount = round(np.random.lognormal(mean=4.5, sigma=1.0), 2)\n        # Clamp to reasonable range\n        amount = min(max(amount, 5.0), 500.0)\n    \n    # Generate device type with realistic distribution\n    device_options = ['mobile', 'desktop', 'tablet']\n    if is_fraud:\n        # Fraudulent transactions more likely from mobile\n        device_weights = [0.65, 0.25, 0.1]\n    else:\n        # Normal distribution favors desktop slightly\n        device_weights = [0.4, 0.5, 0.1]\n    device_type = random.choices(device_options, weights=device_weights)[0]\n    \n    # Generate location\n    locations = [\n        'California, USA', 'New York, USA', 'Texas, USA', 'Florida, USA', \n        'Illinois, USA', 'London, UK', 'Paris, France', 'Berlin, Germany', \n        'Tokyo, Japan', 'Sydney, Australia'\n    ]\n    \n    if is_fraud:\n        # Fraudulent transactions more likely from unusual locations\n        location_weights = [0.05, 0.05, 0.05, 0.05, 0.05, 0.15, 0.2, 0.15, 0.15, 0.1]\n    else:\n        # Normal transactions more likely from US\n        location_weights = [0.25, 0.2, 0.15, 0.1, 0.1, 0.05, 0.05, 0.05, 0.03, 0.02]\n    \n    location = random.choices(locations, weights=location_weights)[0]\n    \n    # Generate VPN usage\n    if is_fraud:\n        # Fraudulent transactions more likely to use VPN\n        is_vpn = random.choices([True, False], weights=[0.7, 0.3])[0]\n    else:\n        # Normal transactions less likely to use VPN\n        is_vpn = random.choices([True, False], weights=[0.08, 0.92])[0]\n    \n    # Generate card type\n    card_options = ['credit', 'debit', 'gift']\n    if is_fraud:\n        # Fraudulent transactions more likely with credit cards or gift cards\n        card_weights = [0.5, 0.2, 0.3]\n    else:\n        # Normal distribution favors debit and credit\n        card_weights = [0.45, 0.5, 0.05]\n    \n    card_type = random.choices(card_options, weights=card_weights)[0]\n    \n    # Generate transaction status\n    status_options = ['approved', 'pending', 'declined']\n    if is_fraud and random.random() < 0.4:\n        # Some fraudulent transactions might be declined or pending\n        status = random.choices(status_options, weights=[0.6, 0.15, 0.25])[0]\n    else:\n        # Most transactions are approved\n        status = random.choices(status_options, weights=[0.95, 0.03, 0.02])[0]\n    \n    # Create transaction object\n    transaction = {\n        'transaction_id': transaction_id,\n        'user_id': user_id,\n        'timestamp': timestamp_str,\n        'amount': amount,\n        'device_type': device_type,\n        'location': location,\n        'is_vpn': is_vpn,\n        'card_type': card_type,\n        'status': status,\n        # Add a label for training purposes (not in the original schema but useful)\n        'is_fraud': is_fraud\n    }\n    \n    return transaction\n\ndef generate_historical_data(num_transactions=50000, fraud_ratio=0.1):\n    \"\"\"Generate historical transaction data with realistic fraud patterns\"\"\"\n    logger.info(f\"Generating {num_transactions} transactions with {fraud_ratio*100}% fraud ratio\")\n    \n    transactions = []\n    num_fraud = int(num_transactions * fraud_ratio)\n    num_legitimate = num_transactions - num_fraud\n    \n    # Generate legitimate transactions\n    for _ in range(num_legitimate):\n        transactions.append(generate_transaction(is_fraud=False))\n    \n    # Generate fraudulent transactions\n    for _ in range(num_fraud):\n        transactions.append(generate_transaction(is_fraud=True))\n    \n    # Shuffle the transactions to mix fraud and legitimate\n    random.shuffle(transactions)\n    \n    # Time-sort transactions to simulate a realistic timeline\n    transactions.sort(key=lambda x: x['timestamp'])\n    \n    # Create consistent user behavior patterns\n    users = {}\n    for transaction in transactions:\n        user_id = transaction['user_id']\n        if user_id not in users:\n            users[user_id] = {\n                'preferred_device': random.choice(['mobile', 'desktop', 'tablet']),\n                'preferred_location': random.choice(['California, USA', 'New York, USA', 'Texas, USA', 'Florida, USA', 'Illinois, USA']),\n                'preferred_card': random.choice(['credit', 'debit']),\n                'transaction_count': 0,\n                'avg_amount': 0\n            }\n        \n        users[user_id]['transaction_count'] += 1\n        users[user_id]['avg_amount'] = ((users[user_id]['avg_amount'] * (users[user_id]['transaction_count'] - 1)) + \n                                     transaction['amount']) / users[user_id]['transaction_count']\n    \n    # Add user behavior consistency to non-fraud transactions (with some randomness)\n    for i, transaction in enumerate(transactions):\n        if not transaction['is_fraud'] and random.random() < 0.85:  # 85% of legitimate transactions follow patterns\n            user_id = transaction['user_id']\n            user = users[user_id]\n            \n            # Apply user preferences with some variability\n            if random.random() < 0.9:  # 90% chance to use preferred device\n                transaction['device_type'] = user['preferred_device']\n            \n            if random.random() < 0.85:  # 85% chance to use preferred location\n                transaction['location'] = user['preferred_location']\n            \n            if random.random() < 0.95:  # 95% chance to use preferred card\n                transaction['card_type'] = user['preferred_card']\n            \n            # Adjust amount to be closer to user's average (with variation)\n            if random.random() < 0.7:  # 70% of transactions are near average\n                avg = user['avg_amount']\n                variation = avg * 0.3  # 30% variation\n                transaction['amount'] = round(random.uniform(avg - variation, avg + variation), 2)\n                transaction['amount'] = max(transaction['amount'], 1.0)  # Ensure positive amount\n            \n            transactions[i] = transaction\n    \n    return transactions\n\ndef upload_to_s3(transactions, bucket, key):\n    \"\"\"Upload transactions to S3 bucket\"\"\"\n    try:\n        # Convert to JSON\n        transactions_json = json.dumps(transactions, indent=2)\n        \n        # Upload to S3\n        s3_client.put_object(\n            Bucket=bucket,\n            Key=key,\n            Body=transactions_json\n        )\n        \n        logger.info(f\"Uploaded {len(transactions)} transactions to s3://{bucket}/{key}\")\n        return True\n    except Exception as e:\n        logger.error(f\"Error uploading data to S3: {str(e)}\")\n        return False\n\ndef lambda_handler(event, context):\n    \"\"\"Lambda handler for generating historical transaction data\"\"\"\n    try:\n        # Check if data already exists\n        if check_data_exists():\n            return {\n                'statusCode': 200,\n                'body': json.dumps('Historical data already exists. No action taken.')\n            }\n        \n        # Generate historical data\n        transactions = generate_historical_data(NUM_TRANSACTIONS, FRAUD_RATIO)\n        \n        # Upload to S3\n        upload_success = upload_to_s3(\n            transactions, \n            S3_BUCKET, \n            f\"{DATA_PREFIX}/transactions.json\"\n        )\n        \n        if upload_success:\n            return {\n                'statusCode': 200,\n                'body': json.dumps(f'Successfully generated and uploaded {NUM_TRANSACTIONS} transactions')\n            }\n        else:\n            return {\n                'statusCode': 500,\n                'body': json.dumps('Failed to upload transactions to S3')\n            }\n            \n    except Exception as e:\n        logger.error(f\"Error in lambda_handler: {str(e)}\")\n        return {\n            'statusCode': 500,\n            'body': json.dumps(f'Error: {str(e)}')\n        }\n\n# For local testing\nif __name__ == \"__main__\":\n    lambda_handler({}, None)"
+             }
+          }
+       },
+       "DataGeneratorLambdaPermission":{
+          "Type":"AWS::Lambda::Permission",
+          "Properties":{
+             "Action":"lambda:InvokeFunction",
+             "FunctionName":{
+                "Fn::GetAtt":[
+                   "DataGeneratorLambda",
+                   "Arn"
+                ]
+             },
+             "Principal":"cloudformation.amazonaws.com",
+             "SourceAccount":{
+                "Ref":"AWS::AccountId"
+             }
+          }
+       },
+       "InvokeDataGeneratorLambda":{
+          "Type":"Custom::InvokeDataGeneratorLambda",
+          "DependsOn":"DataGeneratorLambda",
+          "Properties":{
+             "ServiceToken":{
+                "Fn::GetAtt":[
+                   "DataGeneratorLambda",
+                   "Arn"
+                ]
+             },
+             "Region":{
+                "Ref":"AWS::Region"
+             },
+             "Timestamp":{
+                "Ref":"AWS::AccountId"
+             }
+          }
+       }
     },
-    
-    "Outputs": {
-      "ModelDataBucketName": {
-        "Description": "S3 Bucket for Model Data",
-        "Value": {"Ref": "ModelDataBucketName"}
-      },
-      "DataGeneratorLambdaName": {
-        "Description": "Lambda function that generates transaction data",
-        "Value": {"Ref": "DataGeneratorLambda"}
-      },
-      "DataLocation": {
-        "Description": "Location of historical transaction data",
-        "Value": {"Fn::Sub": "s3://${ModelDataBucketName}/${DataPrefix}/transactions.json"}
-      }
+    "Outputs":{
+       "ModelDataBucketName":{
+          "Description":"S3 Bucket for Model Data",
+          "Value":{
+             "Ref":"ModelDataBucketName"
+          }
+       },
+       "DataGeneratorLambdaName":{
+          "Description":"Lambda function that generates transaction data",
+          "Value":{
+             "Ref":"DataGeneratorLambda"
+          }
+       },
+       "DataLocation":{
+          "Description":"Location of historical transaction data",
+          "Value":{
+             "Fn::Sub":"s3://${ModelDataBucketName}/${DataPrefix}/transactions.json"
+          }
+       }
     }
-  }
+ }

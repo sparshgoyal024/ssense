@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Try to get stack name from environment or use a default
 STACK_NAME = os.environ.get('STACK_NAME', 'fraudssenseassessment')
-AWS_REGION = "us-west-2"  # Fixed region as per requirement
+AWS_REGION = "us-east-1"  # Fixed region as per requirement
 
 # Initialize CloudFormation client
 cfn = boto3.client('cloudformation', region_name=AWS_REGION)
