@@ -317,19 +317,7 @@
                   },
                   {
                     "Fn::Join": ["", ["arn:aws:s3:::", {"Ref": "LambdaCodeS3Bucket"}, "/*"]]
-                  },
-                  {
-                    "Fn::Join": [
-                      "/",
-                      [
-                        {
-                          "Fn::Sub": "arn:aws:s3:::${ssense-fraud-model-data}"
-                        },
-                        "*"
-                      ]
-                    ]
                   }
-                  
 
                 ]
               },
