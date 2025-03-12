@@ -173,7 +173,6 @@ def predict_fraud(transaction, features):
             'error': str(e),
             'feature_values': features
         }
-
 def store_transaction(transaction, prediction):
     """Store transaction and prediction in DynamoDB"""
     try:
