@@ -179,7 +179,7 @@
         "Type": "AWS::SageMaker::NotebookInstance",
         "Properties": {
           "InstanceType": "ml.m5.xlarge",
-          "NotebookInstanceName": "SsenseFraudDetection",
+          "NotebookInstanceName": "SsenseFraudDetection2",
           "RoleArn": {
             "Fn::GetAtt": [
               "NotebookInstanceExecutionRole",
@@ -219,7 +219,7 @@
                       "",
                       "# Download notebook files",
                       {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/sagemaker_fraud_detection.ipynb ."},
-                      {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/generator.py src/package/"},
+                      {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/config.py src/package/"},
                       {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/utils.py src/package/"},
                       {"Fn::Sub": "aws s3 cp s3://${NotebookCodeS3Bucket}/fraud-detection/notebooks/on-start.sh ."},
                       "",
