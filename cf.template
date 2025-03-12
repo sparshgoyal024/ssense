@@ -607,7 +607,7 @@
       ]
     }
   }
-},
+}, 
       "KinesisDataStream": {
         "Type": "AWS::Kinesis::Stream",
         "Properties": {
