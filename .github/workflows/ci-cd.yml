@@ -1,10 +1,6 @@
 name: Fraud Detection CI/CD Pipeline
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
       s3_bucket_name1:
@@ -94,7 +90,7 @@ jobs:
           cd ..
       
       - name: Upload Lambda artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: lambda-package
           path: build/fraud_detection.zip
@@ -113,7 +109,7 @@ jobs:
           cp notebook-package/on-start.sh build/
       
       - name: Upload notebook artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: notebook-package
           path: build/
@@ -133,13 +129,13 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       
       - name: Download lambda package
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: lambda-package
           path: ./lambda-dist
       
       - name: Download notebook package
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: notebook-package
           path: ./notebook-dist
@@ -237,7 +233,7 @@ jobs:
           cat deployment_summary.md
       
       - name: Upload deployment summary
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: deployment-summary
           path: deployment_summary.md

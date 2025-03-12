@@ -8,3 +8,6 @@ venv/
 ENV/
 dist/
 build/
+.history
+
+git remote add origin https://github.com/sparshgoyal024/ssense.git
