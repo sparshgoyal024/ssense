@@ -1,4 +1,4 @@
-name: Fraud Detection CI/CD Pipeline
+name: Fraud Detection CI/CD Pipeline Ssense
 
 on:
   workflow_dispatch:
