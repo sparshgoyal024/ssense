@@ -157,6 +157,10 @@ jobs:
               KinesisStreamName=${{ github.event.inputs.kinesis_stream_name || env.DEFAULT_KINESIS_STREAM_NAME }} \
               NotebookCodeS3Bucket=${NOTEBOOK_CODE_BUCKET} \
               LambdaCodeS3Bucket=${LAMBDA_CODE_BUCKET} \
+              ModelDataBucketName=${{ github.event.inputs.s3_bucket_name1 || env.DEFAULT_S3_BUCKET_NAME1 }} \
+              DataPrefix=historical-data \
+              NumTransactions=50000 \
+              FraudRatio=0.1 \
               SNSEmailAddress=${{ github.event.inputs.sns_email_address || env.DEFAULT_SNS_EMAIL_ADDRESS }} \
             --capabilities CAPABILITY_IAM \
             --no-fail-on-empty-changeset
@@ -169,36 +173,36 @@ jobs:
           echo "Deployed stack with outputs: $outputs"
 
 
-  deploy-cloudformation-cf2:
-    needs: deploy-cloudformation
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v3
+  # deploy-cloudformation-cf2:
+  #   needs: deploy-cloudformation
+  #   runs-on: ubuntu-latest
+  #   environment: production
+  #   steps:
+  #     - uses: actions/checkout@v3
       
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+  #     - name: Configure AWS credentials
+  #       uses: aws-actions/configure-aws-credentials@v2
+  #       with:
+  #         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #         aws-region: ${{ env.AWS_REGION }}
       
-      - name: Deploy CloudFormation cf2 stack
-        run: |
-          aws cloudformation deploy \
-            --template-file cf2.template \
-            --stack-name fraudssenseassessment-datagenerator \
-            --parameter-overrides \
-              ModelDataBucketName=${{ github.event.inputs.s3_bucket_name1 || env.DEFAULT_S3_BUCKET_NAME1 }} \
-              DataPrefix=historical-data \
-              NumTransactions=50000 \
-              FraudRatio=0.1 \
-            --capabilities CAPABILITY_IAM \
-            --no-fail-on-empty-changeset
+  #     - name: Deploy CloudFormation cf2 stack
+  #       run: |
+  #         aws cloudformation deploy \
+  #           --template-file cf2.template \
+  #           --stack-name fraudssenseassessment-datagenerator \
+  #           --parameter-overrides \
+  #             ModelDataBucketName=${{ github.event.inputs.s3_bucket_name1 || env.DEFAULT_S3_BUCKET_NAME1 }} \
+  #             DataPrefix=historical-data \
+  #             NumTransactions=50000 \
+  #             FraudRatio=0.1 \
+  #           --capabilities CAPABILITY_IAM \
+  #           --no-fail-on-empty-changeset
 
 
   invoke-data-generator-lambda:
-    needs: deploy-cloudformation-cf2
+    needs: deploy-cloudformation
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -214,9 +218,7 @@ jobs:
       - name: Get Lambda function name from CloudFormation outputs
         id: get-lambda-name
         run: |
-          LAMBDA_NAME=$(aws cloudformation describe-stacks --stack-name fraudssenseassessment-datagenerator \
-            --query "Stacks[0].Outputs[?OutputKey=='DataGeneratorLambdaName'].OutputValue" \
-            --output text)
+          LAMBDA_NAME=ssense-fraud-data-generator
           echo "LAMBDA_NAME=$LAMBDA_NAME" >> $GITHUB_ENV
           echo "Lambda function to invoke: $LAMBDA_NAME"
 

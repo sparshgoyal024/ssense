@@ -24,29 +24,6 @@
        }
     },
     "Resources":{
-       "ModelDataBucket":{
-          "Type":"AWS::S3::Bucket",
-          "Properties":{
-             "BucketName":{
-                "Ref":"ModelDataBucketName"
-             },
-             "PublicAccessBlockConfiguration":{
-                "BlockPublicAcls":true,
-                "BlockPublicPolicy":true,
-                "IgnorePublicAcls":true,
-                "RestrictPublicBuckets":true
-             },
-             "BucketEncryption":{
-                "ServerSideEncryptionConfiguration":[
-                   {
-                      "ServerSideEncryptionByDefault":{
-                         "SSEAlgorithm":"AES256"
-                      }
-                   }
-                ]
-             }
-          }
-       },
        "DataGeneratorLambdaRole":{
           "Type":"AWS::IAM::Role",
           "Properties":{
@@ -97,41 +74,29 @@
           }
        },
        "DataGeneratorLambda":{
-          "Type":"AWS::Lambda::Function",
-          "Properties":{
-             "FunctionName":"ssense-fraud-data-generator",
-             "Handler":"index.lambda_handler",
-             "Role":{
-                "Fn::GetAtt":[
-                   "DataGeneratorLambdaRole",
-                   "Arn"
-                ]
-             },
-             "Runtime":"python3.9",
-             "Timeout":300,
-             "MemorySize":512,
-             "Environment":{
-                "Variables":{
-                   "MODEL_DATA_S3_BUCKET":{
-                      "Ref":"ModelDataBucketName"
-                   },
-                   "DATA_PREFIX":{
-                      "Ref":"DataPrefix"
-                   },
-                   "NUM_TRANSACTIONS":{
-                      "Ref":"NumTransactions"
-                   },
-                   "FRAUD_RATIO":{
-                      "Ref":"FraudRatio"
-                   }
-                }
-             },
-             "Code":{
-   "S3Bucket": "767089282839-notebook-code",
-   "S3Key": "fraud-detection/notebooks/generator.py"
-}
-          }
-       },
+   "Type":"AWS::Lambda::Function",
+   "Properties":{
+      "FunctionName":"ssense-fraud-data-generator",
+      "Handler":"generator.lambda_handler", 
+      "Role":{
+         "Fn::GetAtt":[
+            "DataGeneratorLambdaRole",
+            "Arn"
+         ]
+      },
+      "Runtime":"python3.12",
+      "Timeout":300,
+      "MemorySize":512,
+      "Environment":{
+         "Variables":{
+         }
+      },
+      "Code":{
+         "S3Bucket": "767089282839-notebook-code",
+         "S3Key": "fraud-detection/notebooks/generator.py"  
+      }
+   }
+},
        "DataGeneratorLambdaPermission":{
           "Type":"AWS::Lambda::Permission",
           "Properties":{
@@ -147,7 +112,8 @@
                 "Ref":"AWS::AccountId"
              }
           }
-       },
+       }
+    },
     "Outputs":{
        "ModelDataBucketName":{
           "Description":"S3 Bucket for Model Data",
