@@ -1,15 +1,21 @@
 name: Fraud Detection CI/CD Pipeline
 
 on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       s3_bucket_name1:
         description: 'S3 Bucket for ML model and training data'
         required: true
+        default: 'fraudassessmentssensemodel'
         type: string
       s3_bucket_name2:
         description: 'S3 Bucket for processed transactions'
         required: true
+        default: 'fraudassessmentssenseresult'
         type: string
       dynamodb_table_name:
         description: 'DynamoDB table name'
@@ -31,6 +37,11 @@ env:
   AWS_REGION: us-west-2
   LAMBDA_CODE_BUCKET: ${{ secrets.AWS_ACCOUNT_ID }}-lambda-code
   NOTEBOOK_CODE_BUCKET: ${{ secrets.AWS_ACCOUNT_ID }}-notebook-code
+  DEFAULT_S3_BUCKET_NAME1: 'fraudassessmentssensemodel'
+  DEFAULT_S3_BUCKET_NAME2: 'fraudassessmentssenseresult'
+  DEFAULT_DYNAMODB_TABLE_NAME: 'ssense-fraud-transactions'
+  DEFAULT_KINESIS_STREAM_NAME: 'ssense-transaction-stream'
+  DEFAULT_SNS_EMAIL_ADDRESS: 'admin@example.com'
 
 jobs:
   validate:
@@ -192,13 +203,13 @@ jobs:
             --template-file cf.template \
             --stack-name fraudssenseassessment \
             --parameter-overrides \
-              S3BucketName1=${{ github.event.inputs.s3_bucket_name1 }} \
-              S3BucketName2=${{ github.event.inputs.s3_bucket_name2 }} \
-              DynamoDBTableName=${{ github.event.inputs.dynamodb_table_name }} \
-              KinesisStreamName=${{ github.event.inputs.kinesis_stream_name }} \
+              S3BucketName1=${{ github.event.inputs.s3_bucket_name1 || env.DEFAULT_S3_BUCKET_NAME1 }} \
+              S3BucketName2=${{ github.event.inputs.s3_bucket_name2 || env.DEFAULT_S3_BUCKET_NAME2 }} \
+              DynamoDBTableName=${{ github.event.inputs.dynamodb_table_name || env.DEFAULT_DYNAMODB_TABLE_NAME }} \
+              KinesisStreamName=${{ github.event.inputs.kinesis_stream_name || env.DEFAULT_KINESIS_STREAM_NAME }} \
               NotebookCodeS3Bucket=${NOTEBOOK_CODE_BUCKET} \
               LambdaCodeS3Bucket=${LAMBDA_CODE_BUCKET} \
-              SNSEmailAddress=${{ github.event.inputs.sns_email_address }} \
+              SNSEmailAddress=${{ github.event.inputs.sns_email_address || env.DEFAULT_SNS_EMAIL_ADDRESS }} \
             --capabilities CAPABILITY_IAM \
             --no-fail-on-empty-changeset
       
